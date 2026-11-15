@@ -584,6 +584,19 @@
         </div>
       </article>
 
+      <article class="card">
+        <div class="card-preview" style="background:linear-gradient(145deg,#05060a,#1a0a40)">
+          <div style="font-size:3rem;filter:drop-shadow(0 0 16px #b8f)">🛸</div>
+        </div>
+        <div class="card-body">
+          <div class="card-tag" style="color:#b8f">3D</div>
+          <h2>Neon Drift 3D</h2>
+          <p>Vlieg door een neon-tunnel in 3D. Ontwijk blokken, pak ringen, boost met Spatie.</p>
+          <div class="controls"><strong>Besturing:</strong> WASD / pijltjes • Spatie = boost</div>
+          <a class="btn btn-primary" style="background:linear-gradient(135deg,#b48aff,#7040ff);color:#fff" href="games/neon-drift-3d.html">▶ Speel nu</a>
+        </div>
+      </article>
+
     </section>
 
     <h2 class="section-title" id="leaderboards">Leaderboards</h2>
@@ -646,6 +659,10 @@
         <h3 style="color:#f1c40f">Idle Clicker</h3>
         <ul class="lb-list" id="lb-idle"><li class="lb-empty">Nog geen scores</li></ul>
       </div>
+      <div class="lb-card" style="border-color:#2a1a4a">
+        <h3 style="color:#b8f">🛸 Neon Drift 3D</h3>
+        <ul class="lb-list" id="lb-neondrift"><li class="lb-empty">Nog geen scores</li></ul>
+      </div>
     </section>
 
     <section id="about" style="padding-bottom: 60px; text-align: center;">
@@ -660,11 +677,13 @@
     </footer>
   </div>
 
+  <script src="lb-config.js"></script>
+  <script src="lb.js"></script>
   <script>
-    function loadLB(key) {
+    async function loadLB(key) {
+      if (window.HeygemmLB) return await HeygemmLB.loadLB(key);
       try {
         let list = JSON.parse(localStorage.getItem(key) || '[]');
-        // alleen beste score per naam
         const best = {};
         list.forEach(e => {
           const n = (e.name || 'Anoniem').toLowerCase();
@@ -676,7 +695,7 @@
     function renderLB(elId, entries, extraFn) {
       const el = document.getElementById(elId);
       if (!el) return;
-      if (!entries.length) {
+      if (!entries || !entries.length) {
         el.innerHTML = '<li class="lb-empty">Nog geen scores — speel een ronde!</li>';
         return;
       }
@@ -686,20 +705,22 @@
         return '<li class="' + rankClass + '"><span class="lb-rank">#' + (i+1) + '</span><span class="lb-name">' + (e.name||'Anoniem') + extra + '</span><span class="lb-score">' + Math.floor(e.score||0) + '</span></li>';
       }).join('');
     }
-    renderLB('lb-bike', loadLB('heygemm_motorbike_leaderboard'), e => e.diff ? ' <small style="opacity:0.6">['+e.diff+']</small>' : '');
-    renderLB('lb-hack', loadLB('heygemm_subway_leaderboard'), e => e.wave ? ' <small style="opacity:0.6">W'+e.wave+'</small>' : '');
-    renderLB('lb-snake', loadLB('heygemm_snake_leaderboard'));
-    renderLB('lb-space', loadLB('heygemm_space_leaderboard'));
-    renderLB('lb-brick', loadLB('heygemm_brick_leaderboard'));
-    renderLB('lb-barrel', loadLB('heygemm_barrel_leaderboard'), e => e.diff ? ' <small style="opacity:0.6">['+e.diff+']</small>' : '');
-    renderLB('lb-pixel', loadLB('heygemm_pixel_leaderboard'), e => e.diff ? ' <small style="opacity:0.6">['+e.diff+']</small>' : '');
-    renderLB('lb-waves', loadLB('heygemm_waves_leaderboard'), e => e.diff ? ' <small style="opacity:0.6">['+e.diff+']</small>' : '');
-    renderLB('lb-orbit', loadLB('heygemm_orbit_leaderboard'));
-    renderLB('lb-boss', loadLB('heygemm_boss_leaderboard'));
-    renderLB('lb-gravity', loadLB('heygemm_gravity_leaderboard'));
-    renderLB('lb-stack', loadLB('heygemm_stack_leaderboard'));
-    renderLB('lb-bubble', loadLB('heygemm_bubble_leaderboard'));
-    renderLB('lb-idle', loadLB('heygemm_idle_leaderboard'));
+    (async function refreshAll() {
+      renderLB('lb-bike', await loadLB('heygemm_motorbike_leaderboard'), e => e.diff ? ' <small style="opacity:0.6">['+e.diff+']</small>' : '');
+      renderLB('lb-hack', await loadLB('heygemm_subway_leaderboard'), e => e.wave ? ' <small style="opacity:0.6">W'+e.wave+'</small>' : '');
+      renderLB('lb-snake', await loadLB('heygemm_snake_leaderboard'));
+      renderLB('lb-space', await loadLB('heygemm_space_leaderboard'));
+      renderLB('lb-brick', await loadLB('heygemm_brick_leaderboard'));
+      renderLB('lb-barrel', await loadLB('heygemm_barrel_leaderboard'), e => e.diff ? ' <small style="opacity:0.6">['+e.diff+']</small>' : '');
+      renderLB('lb-pixel', await loadLB('heygemm_pixel_leaderboard'), e => e.diff ? ' <small style="opacity:0.6">['+e.diff+']</small>' : '');
+      renderLB('lb-waves', await loadLB('heygemm_waves_leaderboard'), e => e.diff ? ' <small style="opacity:0.6">['+e.diff+']</small>' : '');
+      renderLB('lb-orbit', await loadLB('heygemm_orbit_leaderboard'));
+      renderLB('lb-boss', await loadLB('heygemm_boss_leaderboard'));
+      renderLB('lb-gravity', await loadLB('heygemm_gravity_leaderboard'));
+      renderLB('lb-stack', await loadLB('heygemm_stack_leaderboard'));
+      renderLB('lb-bubble', await loadLB('heygemm_bubble_leaderboard'));
+      renderLB('lb-idle', await loadLB('heygemm_idle_leaderboard'));
+    })();
   </script>
 </body>
 </html>
