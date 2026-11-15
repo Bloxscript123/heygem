@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neon Drift 3D – heygemm</title>
+<style>
+  *{margin:0;box-sizing:border-box}
+  body{background:#05060a;color:#e8ecf4;font-family:'Segoe UI',system-ui,sans-serif;overflow:hidden;height:100vh}
+  #c{display:block;width:100vw;height:100vh}
+  .back-home{position:fixed;top:16px;left:16px;z-index:20;background:rgba(0,0,0,.75);color:#b8f;border:1px solid #b8f;padding:8px 14px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;cursor:pointer}
+  .back-home:hover{background:rgba(180,140,255,.2)}
+  #hud{position:fixed;top:16px;right:16px;z-index:20;text-align:right;font-weight:700;text-shadow:0 0 12px #b8f;pointer-events:none}
+  #hud .score{font-size:28px;color:#fff}
+  #hud .sub{font-size:13px;color:#b8f;opacity:.9}
+  #boostBar{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);width:200px;height:10px;background:#1a1a2a;border-radius:6px;z-index:20;overflow:hidden;border:1px solid #333;display:none}
+  #boostFill{height:100%;width:0%;background:linear-gradient(90deg,#0ff,#b8f);box-shadow:0 0 10px #b8f}
+  #ui{position:fixed;inset:0;z-index:15;display:flex;align-items:center;justify-content:center;background:rgba(5,6,10,.82);backdrop-filter:blur(6px)}
+  #ui.hidden{display:none}
+  .panel{width:min(420px,92vw);background:#0d1118;border:1px solid #2a2a40;border-radius:16px;padding:28px 24px;box-shadow:0 0 40px rgba(180,140,255,.15)}
+  .panel h1{font-size:32px;text-align:center;background:linear-gradient(90deg,#b8f,#0ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px}
+  .panel .tag{text-align:center;color:#8b95a8;font-size:13px;margin-bottom:18px}
+  label{display:block;font-size:12px;color:#8b95a8;margin:10px 0 4px}
+  input[type=text]{width:100%;padding:10px 12px;border-radius:8px;border:1px solid #3a3a55;background:#12161e;color:#e8ecf4;font-size:16px}
+  input:focus{outline:none;border-color:#b8f}
+  .diffs{display:flex;gap:8px;margin-top:8px}
+  .diff{flex:1;padding:10px;border-radius:8px;border:1px solid #333;background:#12161e;color:#aaa;cursor:pointer;font-weight:700;font-size:13px}
+  .diff.on{border-color:#b8f;color:#b8f;background:#1a1230;box-shadow:0 0 12px rgba(180,140,255,.3)}
+  .btn{width:100%;margin-top:16px;padding:14px;border:none;border-radius:10px;font-size:17px;font-weight:800;cursor:pointer;background:linear-gradient(135deg,#b48aff,#7040ff);color:#fff}
+  .btn:hover{filter:brightness(1.1)}
+  .btn.ghost{background:transparent;border:1px solid #0ff;color:#0ff;margin-top:10px}
+  #lb{margin-top:16px;font-size:13px;color:#8b95a8}
+  #lb h3{color:#ff0;font-size:13px;margin-bottom:6px}
+  #lb div{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #1a1a28}
+  #lb div:first-of-type span:first-child{color:#ff0}
+  #go h2{text-align:center;font-size:28px;color:#f55;margin-bottom:8px}
+  #go .final{text-align:center;font-size:20px;margin-bottom:12px}
+  .hint{position:fixed;bottom:48px;left:50%;transform:translateX(-50%);z-index:10;color:#8b95a8;font-size:12px;text-align:center;pointer-events:none;opacity:.8}
+</style>
+</head>
+<body>
+<a class="back-home" href="../index.html">&lt; home</a>
+<div id="hud"><div class="score">0</div><div class="sub">NEON DRIFT 3D</div></div>
+<div id="boostBar"><div id="boostFill"></div></div>
+<div class="hint" id="hint">WASD / pijltjes = sturen · Spatie = boost · ontwijk de blokken</div>
+<div id="ui">
+  <div class="panel" id="menu">
+    <h1>NEON DRIFT 3D</h1>
+    <div class="tag">Vlieg door de neon-tunnel. Hoe verder, hoe sneller.</div>
+    <label>JOUW NAAM</label>
+    <input type="text" id="nameIn" maxlength="12" placeholder="Naam">
+    <label>DIFFICULTY</label>
+    <div class="diffs">
+      <button class="diff" data-d="easy">EASY</button>
+      <button class="diff on" data-d="medium">MEDIUM</button>
+      <button class="diff" data-d="hard">HARD</button>
+    </div>
+    <button class="btn" id="startBtn">▶ START</button>
+    <button class="btn ghost" id="homeBtn">&lt; home</button>
+    <div id="lb"><h3>TOP 10</h3><div id="lbList">Nog geen scores</div></div>
+  </div>
+  <div class="panel" id="go" style="display:none">
+    <h2>CRASHED</h2>
+    <div class="final" id="finalScore">0</div>
+    <div id="goLb"></div>
+    <button class="btn" id="againBtn">Opnieuw</button>
+    <button class="btn ghost" id="menuBtn">Menu</button>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const WEBSITE_HOME = '../index.html';
+const LB_KEY = 'heygemm_neondrift_leaderboard';
+const _mem = {};
+function storageGet(k){try{return localStorage.getItem(k)}catch(e){return _mem[k]||null}}
+function storageSet(k,v){try{localStorage.setItem(k,v)}catch(e){_mem[k]=String(v)}}
+function loadLB(){
+  try{
+    let list=JSON.parse(storageGet(LB_KEY)||'[]');
+    const best={};
+    list.forEach(e=>{const n=(e.name||'Anoniem').toLowerCase();if(!best[n]||(e.score||0)>(best[n].score||0))best[n]=e});
+    return Object.values(best).sort((a,b)=>b.score-a.score).slice(0,10);
+  }catch{return[]}
+}
+function saveLB(name,score){
+  name=(name||'Anoniem').trim();
+  let lb=loadLB();
+  const prev=lb.find(e=>(e.name||'').toLowerCase()===name.toLowerCase());
+  const best=Math.floor(score);
+  if(prev&&best<=(prev.score||0))return lb;
+  lb=lb.filter(e=>(e.name||'').toLowerCase()!==name.toLowerCase());
+  lb.push({name,score:best,diff:difficulty,date:Date.now()});
+  lb.sort((a,b)=>b.score-a.score);lb=lb.slice(0,10);
+  storageSet(LB_KEY,JSON.stringify(lb));
+  return lb;
+}
+function renderLB(el,list,highlight){
+  if(!list.length){el.innerHTML='Nog geen scores';return}
+  el.innerHTML=list.slice(0,10).map((e,i)=>
+    `<div style="${highlight&&e.name===highlight?'color:#0f0':''}"><span>#${i+1} ${e.name}${e.diff?' ['+e.diff+']':''}</span><span>${e.score}</span></div>`
+  ).join('');
+}
+
+const DIFFS={
+  easy:{label:'EASY',speed:28,accel:1.5,spawn:0.9,gap:1.15},
+  medium:{label:'MEDIUM',speed:38,accel:2.4,spawn:0.7,gap:1},
+  hard:{label:'HARD',speed:50,accel:3.2,spawn:0.5,gap:0.85}
+};
+let difficulty=storageGet('heygemm_neondrift_diff')||'medium';
+if(!DIFFS[difficulty])difficulty='medium';
+let playerName=storageGet('heygemm_player_name')||'';
+document.getElementById('nameIn').value=playerName;
+
+document.querySelectorAll('.diff').forEach(b=>{
+  b.classList.toggle('on',b.dataset.d===difficulty);
+  b.onclick=()=>{difficulty=b.dataset.d;storageSet('heygemm_neondrift_diff',difficulty);document.querySelectorAll('.diff').forEach(x=>x.classList.toggle('on',x.dataset.d===difficulty))};
+});
+document.getElementById('homeBtn').onclick=()=>location.href=WEBSITE_HOME;
+document.querySelector('.back-home').onclick=e=>{e.preventDefault();location.href=WEBSITE_HOME};
+renderLB(document.getElementById('lbList'),loadLB());
+
+// ——— THREE.JS ———
+let renderer,scene,camera,ship,tunnel=[],obstacles=[],rings=[],stars,clock;
+let running=false,score=0,speed=0,boost=0,baseSpeed=0,hue=280;
+let keys={};
+const shipPos={x:0,y:0};
+
+function initThree(){
+  const w=innerWidth,h=innerHeight;
+  renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(w,h);renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.domElement.id='c';
+  document.body.prepend(renderer.domElement);
+  scene=new THREE.Scene();
+  scene.fog=new THREE.FogExp2(0x05060a,0.012);
+  camera=new THREE.PerspectiveCamera(70,w/h,0.1,500);
+  clock=new THREE.Clock();
+
+  // stars
+  const starGeo=new THREE.BufferGeometry();
+  const starCount=1200;
+  const positions=new Float32Array(starCount*3);
+  for(let i=0;i<starCount*3;i++)positions[i]=(Math.random()-0.5)*400;
+  starGeo.setAttribute('position',new THREE.BufferAttribute(positions,3));
+  stars=new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xffffff,size:0.35,transparent:true,opacity:0.7}));
+  scene.add(stars);
+
+  // ship
+  const shipGroup=new THREE.Group();
+  const body=new THREE.Mesh(
+    new THREE.ConeGeometry(0.6,2.2,6),
+    new THREE.MeshBasicMaterial({color:0x88ccff})
+  );
+  body.rotation.x=Math.PI/2;
+  shipGroup.add(body);
+  const wingL=new THREE.Mesh(new THREE.BoxGeometry(1.6,0.08,0.5),new THREE.MeshBasicMaterial({color:0xb48aff}));
+  wingL.position.set(0,0,-0.3);shipGroup.add(wingL);
+  const glow=new THREE.Mesh(new THREE.SphereGeometry(0.35,8,8),new THREE.MeshBasicMaterial({color:0x00ffff,transparent:true,opacity:0.5}));
+  glow.position.z=1.0;shipGroup.add(glow);
+  ship=shipGroup;
+  ship.position.z=0;
+  scene.add(ship);
+
+  // lights (basic materials mostly, but ambient help for feel)
+  scene.add(new THREE.AmbientLight(0x404060,0.6));
+
+  window.addEventListener('resize',()=>{
+    camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth,innerHeight);
+  });
+}
+
+function resetWorld(){
+  // clear tunnel + obstacles + rings
+  [...tunnel,...obstacles,...rings].forEach(o=>scene.remove(o));
+  tunnel=[];obstacles=[];rings=[];
+  const cfg=DIFFS[difficulty];
+  baseSpeed=cfg.speed;speed=baseSpeed;boost=0;score=0;hue=280;
+  shipPos.x=0;shipPos.y=0;ship.position.set(0,0,0);
+  // build initial tunnel segments
+  for(let i=0;i<40;i++)spawnSegment(-i*8);
+}
+
+function spawnSegment(z){
+  const cfg=DIFFS[difficulty];
+  const group=new THREE.Group();
+  const rad=7*cfg.gap;
+  const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(`hsl(${(hue+z*2)%360},90%,55%)`),wireframe:true,transparent:true,opacity:0.55});
+  // octagon ring
+  for(let i=0;i<8;i++){
+    const a=(i/8)*Math.PI*2;
+    const box=new THREE.Mesh(new THREE.BoxGeometry(2.2,0.18,1.2),mat.clone());
+    box.position.set(Math.cos(a)*rad,Math.sin(a)*rad,0);
+    box.lookAt(0,0,0);
+    group.add(box);
+  }
+  group.position.z=z;
+  scene.add(group);tunnel.push(group);
+
+  // obstacle chance
+  if(z<-20&&Math.random()<0.35){
+    const a=Math.random()*Math.PI*2;
+    const dist=2+Math.random()*(rad-2.5);
+    const obs=new THREE.Mesh(
+      new THREE.BoxGeometry(1.2+Math.random(),1.2+Math.random(),1.2),
+      new THREE.MeshBasicMaterial({color:0xff3355})
+    );
+    obs.position.set(Math.cos(a)*dist,Math.sin(a)*dist,z);
+    obs.userData={r:0.9};
+    scene.add(obs);obstacles.push(obs);
+  }
+  // score ring
+  if(z<-15&&Math.random()<0.25){
+    const ring=new THREE.Mesh(
+      new THREE.TorusGeometry(1.4,0.12,8,24),
+      new THREE.MeshBasicMaterial({color:0x00ffcc})
+    );
+    ring.position.set((Math.random()-0.5)*3,(Math.random()-0.5)*3,z);
+    ring.userData={taken:false};
+    scene.add(ring);rings.push(ring);
+  }
+}
+
+function startGame(){
+  playerName=(document.getElementById('nameIn').value.trim()||'Anoniem').slice(0,12);
+  storageSet('heygemm_player_name',playerName);
+  storageSet('heygemm_neondrift_diff',difficulty);
+  if(!renderer)initThree();
+  resetWorld();
+  running=true;score=0;
+  document.getElementById('ui').classList.add('hidden');
+  document.getElementById('boostBar').style.display='block';
+  document.getElementById('hint').style.display='block';
+  document.getElementById('hud').querySelector('.sub').textContent=DIFFS[difficulty].label;
+}
+
+function crash(){
+  running=false;
+  const lb=saveLB(playerName,score);
+  document.getElementById('ui').classList.remove('hidden');
+  document.getElementById('menu').style.display='none';
+  document.getElementById('go').style.display='block';
+  document.getElementById('finalScore').textContent=playerName+' — '+Math.floor(score);
+  renderLB(document.getElementById('goLb'),lb,playerName);
+  document.getElementById('boostBar').style.display='none';
+  document.getElementById('hint').style.display='none';
+}
+
+document.getElementById('startBtn').onclick=startGame;
+document.getElementById('againBtn').onclick=()=>{document.getElementById('go').style.display='none';document.getElementById('menu').style.display='block';renderLB(document.getElementById('lbList'),loadLB());startGame()};
+document.getElementById('menuBtn').onclick=()=>{document.getElementById('go').style.display='none';document.getElementById('menu').style.display='block';renderLB(document.getElementById('lbList'),loadLB());document.getElementById('ui').classList.remove('hidden')};
+
+window.addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true;if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(e.key.toLowerCase()))e.preventDefault()});
+window.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=Math.min(0.05,clock?clock.getDelta():0.016);
+  if(!renderer){return}
+  if(running){
+    const cfg=DIFFS[difficulty];
+    // boost
+    if(keys[' ']||keys['space'])boost=Math.min(1,boost+dt*1.5);else boost=Math.max(0,boost-dt*1.2);
+    baseSpeed=Math.min(cfg.speed+40,baseSpeed+cfg.accel*dt);
+    speed=baseSpeed*(1+boost*0.9);
+    score+=speed*dt*1.2;
+    hue=(hue+dt*15)%360;
+
+    // steer
+    const turn=28*dt;
+    if(keys['a']||keys['arrowleft'])shipPos.x-=turn;
+    if(keys['d']||keys['arrowright'])shipPos.x+=turn;
+    if(keys['w']||keys['arrowup'])shipPos.y+=turn;
+    if(keys['s']||keys['arrowdown'])shipPos.y-=turn;
+    const limit=4.8*cfg.gap;
+    shipPos.x=Math.max(-limit,Math.min(limit,shipPos.x));
+    shipPos.y=Math.max(-limit,Math.min(limit,shipPos.y));
+    ship.position.x+=(shipPos.x-ship.position.x)*0.15;
+    ship.position.y+=(shipPos.y-ship.position.y)*0.15;
+    ship.rotation.z=-(shipPos.x-ship.position.x)*0.08;
+    ship.rotation.x=(shipPos.y-ship.position.y)*0.05;
+
+    // move world toward camera (segments increase z)
+    const move=speed*dt;
+    tunnel.forEach(t=>t.position.z+=move);
+    obstacles.forEach(o=>o.position.z+=move);
+    rings.forEach(r=>r.position.z+=move);
+    // recycle tunnel
+    while(tunnel.length&&tunnel[0].position.z>12){
+      scene.remove(tunnel.shift());
+      const last=tunnel[tunnel.length-1];
+      spawnSegment((last?last.position.z:0)-8);
+    }
+    obstacles=obstacles.filter(o=>{if(o.position.z>10){scene.remove(o);return false}return true});
+    rings=rings.filter(r=>{if(r.position.z>10){scene.remove(r);return false}return true});
+
+    // collision obstacles
+    for(const o of obstacles){
+      const dx=o.position.x-ship.position.x;
+      const dy=o.position.y-ship.position.y;
+      const dz=o.position.z-ship.position.z;
+      if(Math.sqrt(dx*dx+dy*dy+dz*dz)<1.4){crash();break}
+    }
+    // walls = soft boundary only (no crash)
+
+    // rings
+    for(const r of rings){
+      if(r.userData.taken)continue;
+      const dx=r.position.x-ship.position.x,dy=r.position.y-ship.position.y,dz=r.position.z-ship.position.z;
+      if(Math.sqrt(dx*dx+dy*dy+dz*dz)<2){r.userData.taken=true;score+=50;r.material.color.setHex(0xffff00)}
+    }
+
+    // camera follow
+    camera.position.set(ship.position.x*0.3,ship.position.y*0.3+1.2,ship.position.z+8);
+    camera.lookAt(ship.position.x,ship.position.y,ship.position.z-10);
+    stars.rotation.z+=dt*0.02;
+    stars.position.z=ship.position.z;
+
+    document.getElementById('hud').querySelector('.score').textContent=Math.floor(score);
+    document.getElementById('boostFill').style.width=(boost*100)+'%';
+  } else if(ship){
+    camera.position.set(0,1.5,8);
+    camera.lookAt(0,0,-5);
+  }
+  renderer.render(scene,camera);
+}
+initThree();
+animate();
+</script>
+</body>
+</html>
