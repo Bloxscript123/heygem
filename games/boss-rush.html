@@ -1,0 +1,46 @@
+<!DOCTYPE html><html lang="nl"><head><meta charset="UTF-8"><title>Boss Rush – heygemm</title>
+<style>body{margin:0;background:#0a0c10;color:#e8ecf4;font-family:Segoe UI,system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;overflow:hidden}
+canvas{border:2px solid #1e2633;border-radius:12px;background:#0d1118;box-shadow:0 0 40px #c4f44}
+.back-home{position:fixed;top:16px;left:16px;background:rgba(0,0,0,.75);color:#c4f;border:1px solid #c4f;padding:8px 14px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;z-index:100;cursor:pointer}
+#info{margin-top:12px;color:#8b95a8;font-size:13px;text-align:center;max-width:520px}</style></head><body>
+<a class="back-home" href="../index.html">< home</a>
+<canvas id="c" width="480" height="560"></canvas><div id="info">← → • Spatie schiet • abilities: Rapid / Shield / Mega</div>
+<script>const WEBSITE_HOME='../index.html';const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');const W=480,H=560;
+const _mem={};function storageGet(k){try{return localStorage.getItem(k)}catch(e){return _mem[k]||null}}function storageSet(k,v){try{localStorage.setItem(k,v)}catch(e){_mem[k]=String(v)}}
+
+const LB_KEY='heygemm_boss_leaderboard';
+function loadLB(){try{return JSON.parse(storageGet(LB_KEY)||'[]')}catch{return[]}}
+function saveLB(n,sc){n=(n||'Anoniem').trim();let lb=loadLB();const p=lb.find(e=>(e.name||'').toLowerCase()===n.toLowerCase());if(p&&Math.floor(sc)<=p.score)return lb;lb=lb.filter(e=>(e.name||'').toLowerCase()!==n.toLowerCase());lb.push({name:n,score:Math.floor(sc),diff:difficulty,date:Date.now()});lb.sort((a,b)=>b.score-a.score);lb=lb.slice(0,10);storageSet(LB_KEY,JSON.stringify(lb));return lb}
+const DIFFS={easy:{label:'EASY',dmg:12},medium:{label:'MEDIUM',dmg:8},hard:{label:'HARD',dmg:5}};
+const PTYPES=[{id:'rapid',label:'RAP',color:'#0ff',dur:6},{id:'shield',label:'SHD',color:'#f80',dur:5},{id:'mega',label:'MEGA',color:'#ff0',dur:0}];
+let difficulty=storageGet('heygemm_boss_diff')||'medium';
+let state='menu',score=0,boss,bullets,ebullets,pickups,px=240,keys={},wave=0,powers={rapid:0,shield:0},playerName=storageGet('heygemm_player_name')||'',nameInput=playerName,nameFocused=false,lastShot=0;
+function spawnBoss(){wave++;boss={x:W/2,y:80,hp:40+wave*25,max:40+wave*25,vx:2+wave*0.3,t:0}}
+function reset(){score=0;wave=0;px=240;bullets=[];ebullets=[];pickups=[];powers={rapid:0,shield:0};spawnBoss()}
+function start(){playerName=(nameInput.trim()||'Anoniem').slice(0,12);storageSet('heygemm_player_name',playerName);storageSet('heygemm_boss_diff',difficulty);reset();state='playing'}
+window.addEventListener('keydown',e=>{if(state==='menu'&&nameFocused){if(e.key==='Enter'){nameFocused=false;return}if(e.key==='Backspace'){nameInput=nameInput.slice(0,-1);return}if(e.key.length===1&&nameInput.length<12)nameInput+=e.key;return}if(state==='menu'&&(e.key==='Enter'||e.key===' '))start();if(state==='gameOver'&&(e.key===' '||e.key==='Enter'))state='menu';keys[e.key.toLowerCase()]=true});
+window.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+canvas.onclick=ev=>{const r=canvas.getBoundingClientRect(),mx=(ev.clientX-r.left)*(W/r.width),my=(ev.clientY-r.top)*(H/r.height);if(state==='menu'){if(my>140&&my<175)nameFocused=true;else nameFocused=false;[['easy',80],['medium',190],['hard',300]].forEach(([d,x])=>{if(mx>x&&mx<x+90&&my>200&&my<240)difficulty=d});if(mx>140&&mx<340&&my>270&&my<320)start();if(mx>140&&mx<340&&my>340&&my<380)location.href=WEBSITE_HOME}if(state==='gameOver')state='menu'};
+function loop(){requestAnimationFrame(loop);ctx.fillStyle='#0a0612';ctx.fillRect(0,0,W,H);
+if(state==='menu'){ctx.fillStyle='#c4f';ctx.font='bold 32px Segoe UI';ctx.textAlign='center';ctx.fillText('BOSS RUSH',W/2,70);ctx.fillStyle='#8b95a8';ctx.font='12px Segoe UI';ctx.fillText('Abilities: Rapid • Shield • Mega',W/2,100);ctx.fillStyle='#888';ctx.font='14px Segoe UI';ctx.fillText('JOUW NAAM',W/2,130);ctx.fillStyle='#1a1a1a';ctx.fillRect(90,140,300,35);ctx.strokeStyle='#c4f';ctx.strokeRect(90,140,300,35);ctx.fillStyle='#c4f';ctx.font='18px Segoe UI';ctx.fillText(nameInput+(nameFocused?'|':''),W/2,164);[['easy','#2ecc71',80],['medium','#f1c40f',190],['hard','#e74c3c',300]].forEach(([d,c,x])=>{ctx.fillStyle=difficulty===d?c:'#222';ctx.fillRect(x,200,90,40);ctx.fillStyle=difficulty===d?'#000':c;ctx.font='bold 14px Segoe UI';ctx.fillText(DIFFS[d].label,x+45,226)});ctx.fillStyle='#40a';ctx.fillRect(140,270,200,50);ctx.fillStyle='#c4f';ctx.font='bold 22px Segoe UI';ctx.fillText('START',W/2,303);ctx.fillStyle='#08a';ctx.fillRect(140,340,200,40);ctx.fillStyle='#0ff';ctx.font='bold 15px Segoe UI';ctx.fillText('< home',W/2,366);return}
+if(state==='playing'){const cfg=DIFFS[difficulty];const dt=0.016;for(const k of Object.keys(powers))if(powers[k]>0)powers[k]=Math.max(0,powers[k]-dt);
+ if(keys['a']||keys['arrowleft'])px-=5;if(keys['d']||keys['arrowright'])px+=5;px=Math.max(20,Math.min(W-20,px));
+ const now=performance.now();const cd=powers.rapid>0?80:180;
+ if((keys[' ']||keys['space'])&&now-lastShot>cd){lastShot=now;bullets.push({x:px,y:H-50,vy:-8,dmg:cfg.dmg});if(Math.random()<0.15){const pt=PTYPES[Math.floor(Math.random()*PTYPES.length)];if(pt.id==='mega'){boss.hp-=30;score+=50}else pickups.push({x:boss.x,y:boss.y+30,vy:2,...pt})}}
+ bullets.forEach(b=>b.y+=b.vy);bullets=bullets.filter(b=>b.y>-10);
+ boss.x+=boss.vx;if(boss.x<40||boss.x>W-40)boss.vx*=-1;boss.t+=dt;
+ if(boss.t>0.9){boss.t=0;ebullets.push({x:boss.x,y:boss.y+20,vy:3+wave*0.3,vx:(Math.random()-0.5)*3})}
+ ebullets.forEach(b=>{b.y+=b.vy;b.x+=b.vx||0});ebullets=ebullets.filter(b=>b.y<H+20);
+ pickups.forEach(u=>u.y+=u.vy);pickups=pickups.filter(u=>u.y<H+20);
+ for(let i=pickups.length-1;i>=0;i--){const u=pickups[i];if(Math.abs(u.x-px)<20&&Math.abs(u.y-(H-40))<20){if(u.dur>0)powers[u.id]=u.dur;pickups.splice(i,1)}}
+ for(let i=bullets.length-1;i>=0;i--){if(Math.abs(bullets[i].x-boss.x)<30&&Math.abs(bullets[i].y-boss.y)<30){boss.hp-=bullets[i].dmg;bullets.splice(i,1);score+=10;if(boss.hp<=0){score+=100*wave;spawnBoss()}}}
+ for(const b of ebullets){if(Math.abs(b.x-px)<16&&Math.abs(b.y-(H-40))<16){if(powers.shield>0)powers.shield=0;else{state='gameOver';saveLB(playerName,score)}}}
+ ctx.fillStyle='#f45';ctx.fillRect(boss.x-30,boss.y-20,60,40);ctx.fillStyle='#0f0';ctx.fillRect(boss.x-30,boss.y-28,60*(boss.hp/boss.max),6);
+ ctx.fillStyle='#ff0';bullets.forEach(b=>ctx.fillRect(b.x-2,b.y,4,10));ctx.fillStyle='#f0f';ebullets.forEach(b=>ctx.fillRect(b.x-3,b.y,6,6));
+ pickups.forEach(u=>{ctx.fillStyle=u.color;ctx.beginPath();ctx.arc(u.x,u.y,10,0,Math.PI*2);ctx.fill()});
+ if(powers.shield>0){ctx.strokeStyle='#f80';ctx.lineWidth=3;ctx.strokeRect(px-16,H-52,32,28)}
+ ctx.fillStyle='#4af';ctx.fillRect(px-14,H-48,28,20);ctx.fillStyle='#fff';ctx.font='bold 16px Segoe UI';ctx.textAlign='left';ctx.fillText('SCORE '+score+'  WAVE '+wave,12,28);
+ let py=50;for(const [k,v] of Object.entries(powers)){if(v<=0)continue;const info=PTYPES.find(p=>p.id===k);if(!info||!info.dur)continue;ctx.fillStyle=info.color;ctx.fillRect(W-120,py,110*(v/info.dur),16);ctx.fillStyle='#000';ctx.font='10px Segoe UI';ctx.textAlign='center';ctx.fillText(info.label,W-65,py+12);py+=22}}
+if(state==='gameOver'){ctx.fillStyle='rgba(0,0,0,.75)';ctx.fillRect(0,0,W,H);ctx.fillStyle='#f55';ctx.font='bold 36px Segoe UI';ctx.textAlign='center';ctx.fillText('DEFEATED',W/2,200);ctx.fillStyle='#fff';ctx.font='20px Segoe UI';ctx.fillText(playerName+' — '+score,W/2,250);ctx.fillStyle='#c4f';ctx.fillText('SPACE → menu',W/2,320)}}
+requestAnimationFrame(loop);
+</script></body></html>

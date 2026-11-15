@@ -1,0 +1,41 @@
+<!DOCTYPE html><html lang="nl"><head><meta charset="UTF-8"><title>Bubble Pop – heygemm</title>
+<style>body{margin:0;background:#0a0c10;color:#e8ecf4;font-family:Segoe UI,system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;overflow:hidden}
+canvas{border:2px solid #1e2633;border-radius:12px;background:#0d1118;box-shadow:0 0 40px #0cf44}
+.back-home{position:fixed;top:16px;left:16px;background:rgba(0,0,0,.75);color:#0cf;border:1px solid #0cf;padding:8px 14px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;z-index:100;cursor:pointer}
+#info{margin-top:12px;color:#8b95a8;font-size:13px;text-align:center;max-width:520px}</style></head><body>
+<a class="back-home" href="../index.html">< home</a>
+<canvas id="c" width="480" height="560"></canvas><div id="info">Klik bubbles • abilities: Slow / Frenzy / Bomb</div>
+<script>const WEBSITE_HOME='../index.html';const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');const W=480,H=560;
+const _mem={};function storageGet(k){try{return localStorage.getItem(k)}catch(e){return _mem[k]||null}}function storageSet(k,v){try{localStorage.setItem(k,v)}catch(e){_mem[k]=String(v)}}
+
+const LB_KEY='heygemm_bubble_leaderboard';
+function loadLB(){try{return JSON.parse(storageGet(LB_KEY)||'[]')}catch{return[]}}
+function saveLB(n,sc){n=(n||'Anoniem').trim();let lb=loadLB();const p=lb.find(e=>(e.name||'').toLowerCase()===n.toLowerCase());if(p&&Math.floor(sc)<=p.score)return lb;lb=lb.filter(e=>(e.name||'').toLowerCase()!==n.toLowerCase());lb.push({name:n,score:Math.floor(sc),diff:difficulty,date:Date.now()});lb.sort((a,b)=>b.score-a.score);lb=lb.slice(0,10);storageSet(LB_KEY,JSON.stringify(lb));return lb}
+const DIFFS={easy:{label:'EASY',spawn:0.8},medium:{label:'MEDIUM',spawn:0.5},hard:{label:'HARD',spawn:0.3}};
+const PTYPES=[{id:'slow',label:'SLOW',color:'#a0f',dur:5},{id:'frenzy',label:'FRNZ',color:'#f0f',dur:6},{id:'bomb',label:'BOMB',color:'#f44',dur:0}];
+let difficulty=storageGet('heygemm_bubble_diff')||'medium';
+let state='menu',score=0,combo=0,bubbles=[],pickups=[],powers={slow:0,frenzy:0},t=0,time=60,playerName=storageGet('heygemm_player_name')||'',nameInput=playerName,nameFocused=false;
+function reset(){score=0;combo=0;bubbles=[];pickups=[];powers={slow:0,frenzy:0};t=0;time=60}
+function start(){playerName=(nameInput.trim()||'Anoniem').slice(0,12);storageSet('heygemm_player_name',playerName);storageSet('heygemm_bubble_diff',difficulty);reset();state='playing'}
+window.addEventListener('keydown',e=>{if(state==='menu'&&nameFocused){if(e.key==='Enter'){nameFocused=false;return}if(e.key==='Backspace'){nameInput=nameInput.slice(0,-1);return}if(e.key.length===1&&nameInput.length<12)nameInput+=e.key;return}if(state==='menu'&&(e.key==='Enter'||e.key===' '))start();if(state==='gameOver'&&(e.key===' '||e.key==='Enter'))state='menu'});
+canvas.onclick=ev=>{const r=canvas.getBoundingClientRect(),mx=(ev.clientX-r.left)*(W/r.width),my=(ev.clientY-r.top)*(H/r.height);
+ if(state==='menu'){if(my>140&&my<175)nameFocused=true;else nameFocused=false;[['easy',80],['medium',190],['hard',300]].forEach(([d,x])=>{if(mx>x&&mx<x+90&&my>200&&my<240)difficulty=d});if(mx>140&&mx<340&&my>270&&my<320)start();if(mx>140&&mx<340&&my>340&&my<380)location.href=WEBSITE_HOME}
+ if(state==='playing'){let hit=false;
+  for(let i=pickups.length-1;i>=0;i--){const u=pickups[i];if(Math.hypot(mx-u.x,my-u.y)<u.r+8){if(u.id==='bomb'){score+=bubbles.length*15;bubbles=[];}else powers[u.id]=u.dur;pickups.splice(i,1);hit=true;break}}
+  for(let i=bubbles.length-1;i>=0;i--){const b=bubbles[i];if(Math.hypot(mx-b.x,my-b.y)<b.r){bubbles.splice(i,1);combo++;score+=10*combo*(powers.frenzy>0?2:1);hit=true;if(Math.random()<0.12){const pt=PTYPES[Math.floor(Math.random()*PTYPES.length)];pickups.push({x:b.x,y:b.y,r:12,vy:-1,...pt})}break}}
+  if(!hit)combo=0}
+ if(state==='gameOver')state='menu'};
+function loop(){requestAnimationFrame(loop);ctx.fillStyle='#0a1828';ctx.fillRect(0,0,W,H);
+if(state==='menu'){ctx.fillStyle='#0cf';ctx.font='bold 32px Segoe UI';ctx.textAlign='center';ctx.fillText('BUBBLE POP',W/2,70);ctx.fillStyle='#8b95a8';ctx.font='12px Segoe UI';ctx.fillText('Abilities: Slow • Frenzy • Bomb',W/2,100);ctx.fillStyle='#888';ctx.font='14px Segoe UI';ctx.fillText('JOUW NAAM',W/2,130);ctx.fillStyle='#1a1a1a';ctx.fillRect(90,140,300,35);ctx.strokeStyle='#0cf';ctx.strokeRect(90,140,300,35);ctx.fillStyle='#0cf';ctx.font='18px Segoe UI';ctx.fillText(nameInput+(nameFocused?'|':''),W/2,164);[['easy','#2ecc71',80],['medium','#f1c40f',190],['hard','#e74c3c',300]].forEach(([d,c,x])=>{ctx.fillStyle=difficulty===d?c:'#222';ctx.fillRect(x,200,90,40);ctx.fillStyle=difficulty===d?'#000':c;ctx.font='bold 14px Segoe UI';ctx.fillText(DIFFS[d].label,x+45,226)});ctx.fillStyle='#068';ctx.fillRect(140,270,200,50);ctx.fillStyle='#0cf';ctx.font='bold 22px Segoe UI';ctx.fillText('START',W/2,303);ctx.fillStyle='#08a';ctx.fillRect(140,340,200,40);ctx.fillStyle='#0ff';ctx.font='bold 15px Segoe UI';ctx.fillText('< home',W/2,366);return}
+if(state==='playing'){const cfg=DIFFS[difficulty];const dt=0.016;for(const k of Object.keys(powers))if(powers[k]>0)powers[k]=Math.max(0,powers[k]-dt);
+ t+=dt;time-=dt*(powers.slow>0?0.4:1);if(time<=0){state='gameOver';saveLB(playerName,score)}
+ if(Math.random()<cfg.spawn*0.05*(powers.frenzy>0?2:1))bubbles.push({x:40+Math.random()*(W-80),y:H+20,r:16+Math.random()*22,vy:-(1+Math.random()*2),c:`hsl(${Math.random()*360},80%,60%)`});
+ bubbles.forEach(b=>b.y+=b.vy*(powers.slow>0?0.5:1));bubbles=bubbles.filter(b=>b.y>-40);
+ pickups.forEach(u=>u.y+=(u.vy||0));
+ bubbles.forEach(b=>{ctx.fillStyle=b.c+'88';ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff8';ctx.stroke()});
+ pickups.forEach(u=>{ctx.fillStyle=u.color;ctx.beginPath();ctx.arc(u.x,u.y,12,0,Math.PI*2);ctx.fill();ctx.fillStyle='#000';ctx.font='bold 8px Segoe UI';ctx.textAlign='center';ctx.fillText(u.label.slice(0,3),u.x,u.y+3)});
+ ctx.fillStyle='#fff';ctx.font='bold 18px Segoe UI';ctx.textAlign='left';ctx.fillText('SCORE '+score+'  COMBO x'+combo,12,28);ctx.fillText('TIME '+Math.ceil(time),12,52);
+ let py=70;for(const [k,v] of Object.entries(powers)){if(v<=0)continue;const info=PTYPES.find(p=>p.id===k);if(!info.dur)continue;ctx.fillStyle=info.color;ctx.fillRect(W-120,py,110*(v/info.dur),16);ctx.fillStyle='#000';ctx.font='10px Segoe UI';ctx.textAlign='center';ctx.fillText(info.label,W-65,py+12);py+=22}}
+if(state==='gameOver'){ctx.fillStyle='rgba(0,0,0,.75)';ctx.fillRect(0,0,W,H);ctx.fillStyle='#0cf';ctx.font='bold 36px Segoe UI';ctx.textAlign='center';ctx.fillText('TIME UP',W/2,200);ctx.fillStyle='#fff';ctx.font='20px Segoe UI';ctx.fillText(playerName+' — '+score,W/2,250);ctx.fillStyle='#0cf';ctx.fillText('SPACE → menu',W/2,320)}}
+requestAnimationFrame(loop);
+</script></body></html>

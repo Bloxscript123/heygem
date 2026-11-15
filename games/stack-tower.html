@@ -1,0 +1,39 @@
+<!DOCTYPE html><html lang="nl"><head><meta charset="UTF-8"><title>Stack Tower – heygemm</title>
+<style>body{margin:0;background:#0a0c10;color:#e8ecf4;font-family:Segoe UI,system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;overflow:hidden}
+canvas{border:2px solid #1e2633;border-radius:12px;background:#0d1118;box-shadow:0 0 40px #e67e2244}
+.back-home{position:fixed;top:16px;left:16px;background:rgba(0,0,0,.75);color:#e67e22;border:1px solid #e67e22;padding:8px 14px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;z-index:100;cursor:pointer}
+#info{margin-top:12px;color:#8b95a8;font-size:13px;text-align:center;max-width:520px}</style></head><body>
+<a class="back-home" href="../index.html">< home</a>
+<canvas id="c" width="480" height="560"></canvas><div id="info">Spatie = plaats • abilities elke 3: Slow / Wide / Perfect</div>
+<script>const WEBSITE_HOME='../index.html';const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');const W=480,H=560;
+const _mem={};function storageGet(k){try{return localStorage.getItem(k)}catch(e){return _mem[k]||null}}function storageSet(k,v){try{localStorage.setItem(k,v)}catch(e){_mem[k]=String(v)}}
+
+const LB_KEY='heygemm_stack_leaderboard';
+function loadLB(){try{return JSON.parse(storageGet(LB_KEY)||'[]')}catch{return[]}}
+function saveLB(n,sc){n=(n||'Anoniem').trim();let lb=loadLB();const p=lb.find(e=>(e.name||'').toLowerCase()===n.toLowerCase());if(p&&Math.floor(sc)<=p.score)return lb;lb=lb.filter(e=>(e.name||'').toLowerCase()!==n.toLowerCase());lb.push({name:n,score:Math.floor(sc),diff:difficulty,date:Date.now()});lb.sort((a,b)=>b.score-a.score);lb=lb.slice(0,10);storageSet(LB_KEY,JSON.stringify(lb));return lb}
+const DIFFS={easy:{label:'EASY',spd:2.5},medium:{label:'MEDIUM',spd:3.8},hard:{label:'HARD',spd:5.2}};
+let difficulty=storageGet('heygemm_stack_diff')||'medium';
+let state='menu',score=0,blocks=[],cur=null,dir=1,powers={slow:0,wide:0,perfect:0},playerName=storageGet('heygemm_player_name')||'',nameInput=playerName,nameFocused=false;
+function reset(){score=0;blocks=[{x:140,y:H-40,w:200}];cur={x:40,y:H-80,w:200};dir=1;powers={slow:0,wide:0,perfect:0}}
+function start(){playerName=(nameInput.trim()||'Anoniem').slice(0,12);storageSet('heygemm_player_name',playerName);storageSet('heygemm_stack_diff',difficulty);reset();state='playing'}
+function place(){if(state!=='playing'||!cur)return;const prev=blocks[blocks.length-1];
+ if(powers.perfect>0){cur.x=prev.x;cur.w=prev.w;powers.perfect=0}
+ const left=Math.max(cur.x,prev.x);const right=Math.min(cur.x+cur.w,prev.x+prev.w);let w=right-left;
+ if(powers.wide>0){w=Math.min(prev.w,w+20);powers.wide=0}
+ if(w<=4){state='gameOver';saveLB(playerName,score);return}
+ cur.x=left;cur.w=w;blocks.push({x:cur.x,y:cur.y,w:cur.w});score++;
+ // random ability every 3 stacks
+ if(score%3===0){const r=Math.random();if(r<0.33)powers.slow=5;else if(r<0.66)powers.wide=1;else powers.perfect=1}
+ const top=blocks[blocks.length-1];cur={x:dir>0?0:W-top.w,y:top.y-40,w:top.w};if(cur.y<40){blocks.forEach(b=>b.y+=40);cur.y+=40}}
+window.addEventListener('keydown',e=>{if(state==='menu'&&nameFocused){if(e.key==='Enter'){nameFocused=false;return}if(e.key==='Backspace'){nameInput=nameInput.slice(0,-1);return}if(e.key.length===1&&nameInput.length<12)nameInput+=e.key;return}if(state==='menu'&&(e.key==='Enter'||e.key===' '))start();if(state==='gameOver'&&(e.key===' '||e.key==='Enter'))state='menu';if(state==='playing'&&e.key===' ')place();e.preventDefault()});
+canvas.onclick=ev=>{const r=canvas.getBoundingClientRect(),mx=(ev.clientX-r.left)*(W/r.width),my=(ev.clientY-r.top)*(H/r.height);if(state==='menu'){if(my>140&&my<175)nameFocused=true;else nameFocused=false;[['easy',80],['medium',190],['hard',300]].forEach(([d,x])=>{if(mx>x&&mx<x+90&&my>200&&my<240)difficulty=d});if(mx>140&&mx<340&&my>270&&my<320)start();if(mx>140&&mx<340&&my>340&&my<380)location.href=WEBSITE_HOME}else if(state==='playing')place();else state='menu'};
+function loop(){requestAnimationFrame(loop);ctx.fillStyle='#12161e';ctx.fillRect(0,0,W,H);
+if(state==='menu'){ctx.fillStyle='#e67e22';ctx.font='bold 32px Segoe UI';ctx.textAlign='center';ctx.fillText('STACK TOWER',W/2,70);ctx.fillStyle='#8b95a8';ctx.font='12px Segoe UI';ctx.fillText('Abilities: Slow • Wide • Perfect snap',W/2,100);ctx.fillStyle='#888';ctx.font='14px Segoe UI';ctx.fillText('JOUW NAAM',W/2,130);ctx.fillStyle='#1a1a1a';ctx.fillRect(90,140,300,35);ctx.strokeStyle='#e67e22';ctx.strokeRect(90,140,300,35);ctx.fillStyle='#e67e22';ctx.font='18px Segoe UI';ctx.fillText(nameInput+(nameFocused?'|':''),W/2,164);[['easy','#2ecc71',80],['medium','#f1c40f',190],['hard','#e74c3c',300]].forEach(([d,c,x])=>{ctx.fillStyle=difficulty===d?c:'#222';ctx.fillRect(x,200,90,40);ctx.fillStyle=difficulty===d?'#000':c;ctx.font='bold 14px Segoe UI';ctx.fillText(DIFFS[d].label,x+45,226)});ctx.fillStyle='#a40';ctx.fillRect(140,270,200,50);ctx.fillStyle='#e67e22';ctx.font='bold 22px Segoe UI';ctx.fillText('START',W/2,303);ctx.fillStyle='#08a';ctx.fillRect(140,340,200,40);ctx.fillStyle='#0ff';ctx.font='bold 15px Segoe UI';ctx.fillText('< home',W/2,366);return}
+if(state==='playing'){const cfg=DIFFS[difficulty];const dt=0.016;if(powers.slow>0)powers.slow=Math.max(0,powers.slow-dt);
+ const spd=cfg.spd*(powers.slow>0?0.4:1);cur.x+=dir*spd;if(cur.x+cur.w>W||cur.x<0)dir*=-1;
+ blocks.forEach((b,i)=>{ctx.fillStyle=`hsl(${30+i*8},80%,50%)`;ctx.fillRect(b.x,b.y,b.w,36)});
+ ctx.fillStyle='#fff';ctx.fillRect(cur.x,cur.y,cur.w,36);ctx.fillStyle='#fff';ctx.font='bold 22px Segoe UI';ctx.textAlign='left';ctx.fillText(score,12,36);
+ if(powers.slow>0){ctx.fillStyle='#a0f';ctx.fillText('SLOW',W-80,36)}if(powers.wide){ctx.fillStyle='#0f0';ctx.fillText('WIDE next',W-100,56)}if(powers.perfect){ctx.fillStyle='#ff0';ctx.fillText('PERFECT next',W-120,76)}}
+if(state==='gameOver'){ctx.fillStyle='rgba(0,0,0,.75)';ctx.fillRect(0,0,W,H);ctx.fillStyle='#f55';ctx.font='bold 36px Segoe UI';ctx.textAlign='center';ctx.fillText('TOWER FELL',W/2,200);ctx.fillStyle='#fff';ctx.font='20px Segoe UI';ctx.fillText(playerName+' — '+score,W/2,250);ctx.fillStyle='#e67e22';ctx.fillText('SPACE → menu',W/2,320)}}
+requestAnimationFrame(loop);
+</script></body></html>

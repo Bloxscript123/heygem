@@ -1,0 +1,2139 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<title>Subway Servers Hack - 2D</title>
+<style>
+  body {
+    margin: 0;
+    background: #000;
+    color: #0f0;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+  }
+  canvas {
+    border: 1px solid #0f0;
+    background: #000;
+  }
+  #info {
+    margin-top: 10px;
+    text-align: center;
+    font-size: 14px;
+  }
+  .back-home {
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    background: rgba(0,0,0,0.75);
+    color: #0f0;
+    border: 1px solid #0f0;
+    padding: 8px 14px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 600;
+    z-index: 100;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    transition: background 0.2s;
+    cursor: pointer;
+  }
+  .back-home:hover {
+    background: rgba(0,255,0,0.18);
+  }
+</style>
+</head>
+<body>
+<a class="back-home" id="navBtn" href="../index.html">< home</a>
+<canvas id="game" width="800" height="500"></canvas>
+<div id="info">
+  WASD / Arrows = move • Shift = boost • Space = shoot • / = command • Shop (top right) • Die → HOME for skin & wave
+</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+const W = canvas.width;
+const H = canvas.height;
+
+// Website homepage (jouw Downloads)
+const WEBSITE_HOME='../index.html';
+
+// Safe storage (no crash when sandboxed without localStorage)
+const _mem = {};
+function storageGet(key) {
+  try { return window.localStorage.getItem(key); } catch (e) { return _mem[key] != null ? _mem[key] : null; }
+}
+function storageSet(key, val) {
+  try { window.localStorage.setItem(key, val); } catch (e) { _mem[key] = String(val); }
+}
+
+// Matrix rain
+const fontSize = 14;
+const columns = Math.floor(W / fontSize);
+const drops = Array(columns).fill(1);
+const chars = '0123456789ABCDEF$%#@&*+-=';
+
+// Player
+const BASE_SIZE = 10;
+const BASE_SPEED = 2.5;
+let player = { x: W/2, y: H/2, size: BASE_SIZE, speed: BASE_SPEED };
+let moveTime = 0;
+let playTime = 0;
+
+// Stamina / Boost
+let stamina = 100;
+const MAX_STAMINA = 100;
+const BOOST_MULTIPLIER = 2.2;
+const STAMINA_DRAIN = 28;   // per second while boosting
+const STAMINA_REGEN = 18;   // per second while not boosting
+
+// Health
+let health = 100;
+const MAX_HEALTH = 100;
+const ENEMY_DAMAGE = 7; // percent per hit
+
+// Game state
+let gameState = 'menu'; // 'menu' | 'playing' | 'gameOver'
+let gameOver = false;
+let peacefulMode = false; // true = no waves / enemies
+let opFun = false;        // no cooldowns
+let forceField = false;   // infinite health + visual field
+
+// Home / Menu settings
+let startWave = 1;
+let playerShape = 'square'; // square | triangle | pentagon | circle
+let playerColor = '#0f0';
+const SHAPES = ['square', 'triangle', 'pentagon', 'circle'];
+const COLORS = ['#0f0', '#0ff', '#ff0', '#f0f', '#fff', '#f80', '#08f', '#f44'];
+
+// Enemies - tiny blue spaceships
+let enemies = [];
+let enemyBullets = [];
+let playerBullets = [];
+let minions = [];
+let waveTimer = 3;
+let waveNumber = 0;
+let waveClearTimer = 0;
+let waveMessage = '';
+let waveMessageTimer = 0;
+const ENEMY_SHOOT_INTERVAL = 1.8;
+let lastSpace = 0;
+const SPACE_COOLDOWN = 0.28;
+const MAX_SHIPS = 10;
+
+// Upgrades
+let upgrades = [];
+let extraMaxHealth = 0;      // +50% max health
+let speedMultiplier = 1;     // 2x speed
+let shootSpeedMultiplier = 1; // 2x shooting
+let touchKill = false;       // kill by touching
+let lastUpgradeSpawn = 0;
+
+const UPGRADE_TYPES = [
+  { id: 'health',  name: '+50% MAX HP',  color: '#0f0',  chance: 0.30 },
+  { id: 'speed',   name: '2X SPEED',     color: '#0ff',  chance: 0.28 },
+  { id: 'shoot',   name: '2X SHOOT',     color: '#ff0',  chance: 0.28 },
+  { id: 'touch',   name: 'TOUCH KILL',   color: '#f0f',  chance: 0.14 }
+];
+
+// Collectibles
+let items = [];
+function spawnItem() {
+  items.push({
+    x: Math.random() * (W - 40) + 20,
+    y: Math.random() * (H - 40) + 20,
+    size: 16,
+    value: Math.floor(Math.random() * 90 + 10)
+  });
+}
+for (let i = 0; i < 6; i++) spawnItem();
+
+let score = 0;
+const keys = {};
+
+// Leaderboard + player name
+const LB_KEY = 'heygemm_subway_leaderboard';
+let playerName = storageGet('heygemm_player_name') || '';
+let nameInput = playerName;
+let nameFocused = false;
+
+function loadLeaderboard() {
+  try {
+    return JSON.parse(storageGet(LB_KEY) || '[]');
+  } catch { return []; }
+}
+function saveToLeaderboard(name, sc, wave) {
+  name = (name || 'Anoniem').trim();
+  let lb = loadLeaderboard();
+  const prev = lb.find(e => (e.name || '').toLowerCase() === name.toLowerCase());
+  const best = Math.floor(sc);
+  if (prev && best <= (prev.score || 0)) return lb;
+  lb = lb.filter(e => (e.name || '').toLowerCase() !== name.toLowerCase());
+  lb.push({ name: name, score: best, wave: wave || 0, date: Date.now() });
+  lb.sort((a, b) => b.score - a.score);
+  lb = lb.slice(0, 10);
+  storageSet(LB_KEY, JSON.stringify(lb));
+  return lb;
+}
+let leaderboard = loadLeaderboard();
+
+// Shop & unlocks
+let shopOpen = false;
+let tUnlocked = false;
+let rUnlocked = false;
+let yUnlocked = false;
+let qUnlocked = false;
+
+let dashActive = false;
+let dashTime = 0;
+const DASH_DURATION = 1.1;
+let lastDash = -20;
+const DASH_CD = 12;
+
+let stunned = false;
+let stunTime = 0;
+
+const T_PRICE = 1000;
+const R_PRICE = 2000;
+const Y_PRICE = 5000;
+const RANDOM_PRICE = 5000;
+
+// Random power state (permanent)
+let permanentPowers = []; // list of active permanent powers
+let scoreMultiplier = 1;
+let rolling = false;
+let rollDisplay = '';
+let rollTimer = 0;
+let finalPower = '';
+let rollSpeed = 0.08;
+
+// Abilities
+let lastTeleport = -30;
+const TELEPORT_CD = 30;
+
+let lastSizeBoost = -15;
+const SIZE_CD = 15;
+const SIZE_DURATION = 7;
+let sizeBoostActive = false;
+let sizeBoostEnd = 0;
+
+const SUPER_COST = 750;
+let scoreAtLastSuper = 0;
+let dragonActive = false;
+let dragonTime = 0;
+let dragonX = -100;
+
+// Shop + Home button areas
+const shopBtn = { x: W - 120, y: 10, w: 100, h: 30 };
+const homeBtn = { x: 15, y: 10, w: 90, h: 30 };
+
+// Command bar
+let commandText = '';
+let commandMessage = '';
+let commandOpen = false;
+
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  // ===== MENU / HOME SCREEN =====
+  if (gameState === 'menu') {
+    // Wave - button
+    if (mx >= 250 && mx <= 300 && my >= 140 && my <= 176) {
+      startWave = Math.max(1, startWave - 1);
+      return;
+    }
+    // Wave + button
+    if (mx >= 400 && mx <= 450 && my >= 140 && my <= 176) {
+      startWave = Math.min(50, startWave + 1);
+      return;
+    }
+    // Peaceful toggle
+    if (mx >= W/2 - 110 && mx <= W/2 + 110 && my >= 195 && my <= 240) {
+      peacefulMode = !peacefulMode;
+      return;
+    }
+    // Shape buttons
+    const shapeStartX = 150;
+    SHAPES.forEach((s, i) => {
+      const bx = shapeStartX + i * 130;
+      if (mx >= bx && mx <= bx + 110 && my >= 275 && my <= 315) {
+        playerShape = s;
+      }
+    });
+    // Color buttons
+    COLORS.forEach((c, i) => {
+      const bx = 140 + i * 70;
+      if (mx >= bx && mx <= bx + 55 && my >= 345 && my <= 385) {
+        playerColor = c;
+      }
+    });
+    // Name input field click
+    if (mx >= W/2 - 140 && mx <= W/2 + 140 && my >= 78 && my <= 110) {
+      nameFocused = true;
+      return;
+    }
+    // START button
+    if (mx >= W/2 - 120 && mx <= W/2 + 120 && my >= 430 && my <= 480) {
+      playerName = (nameInput.trim() || 'Anoniem').slice(0, 12);
+      storageSet('heygemm_player_name', playerName);
+      nameFocused = false;
+      startGame();
+      return;
+    }
+    nameFocused = false;
+    return;
+  }
+
+  // ===== GAME OVER SCREEN =====
+  if (gameState === 'gameOver' || gameOver) {
+    // Respawn button
+    if (mx >= W/2 - 100 && mx <= W/2 + 100 && my >= H - 110 && my <= H - 70) {
+      respawn();
+      return;
+    }
+    // HOME button
+    if (mx >= W/2 - 100 && mx <= W/2 + 100 && my >= H - 60 && my <= H - 20) {
+      goToHome();
+      return;
+    }
+    return;
+  }
+
+  // ===== PLAYING =====
+  if (!shopOpen) {
+    // Home button (top left)
+    if (mx >= homeBtn.x && mx <= homeBtn.x + homeBtn.w && my >= homeBtn.y && my <= homeBtn.y + homeBtn.h) {
+      goToHome();
+      return;
+    }
+    // Shop button (top right)
+    if (mx >= shopBtn.x && mx <= shopBtn.x + shopBtn.w && my >= shopBtn.y && my <= shopBtn.y + shopBtn.h) {
+      shopOpen = true;
+    }
+  } else {
+    // Close if click outside or on close
+    if (my < 80 || my > 500) {
+      shopOpen = false;
+      return;
+    }
+    // Buy buttons
+    if (my > 100 && my < 140 && score >= T_PRICE && !tUnlocked) {
+      score -= T_PRICE;
+      scoreAtLastSuper = Math.max(0, scoreAtLastSuper - T_PRICE);
+      tUnlocked = true;
+    }
+    if (my > 150 && my < 190 && score >= R_PRICE && !rUnlocked) {
+      score -= R_PRICE;
+      scoreAtLastSuper = Math.max(0, scoreAtLastSuper - R_PRICE);
+      rUnlocked = true;
+    }
+    if (my > 200 && my < 240 && score >= Y_PRICE && !yUnlocked) {
+      score -= Y_PRICE;
+      scoreAtLastSuper = Math.max(0, scoreAtLastSuper - Y_PRICE);
+      yUnlocked = true;
+    }
+    if (my > 250 && my < 290 && score >= RANDOM_PRICE) {
+      score -= RANDOM_PRICE;
+      scoreAtLastSuper = Math.max(0, scoreAtLastSuper - RANDOM_PRICE);
+      activateRandomPower();
+    }
+    // Blue mode button on the left of the shop
+    if (mx >= 20 && mx <= 180 && my >= 280 && my <= 320) {
+      peacefulMode = !peacefulMode;
+    }
+  }
+});
+
+window.addEventListener('keydown', e => {
+  // Name input on menu
+  if (gameState === 'menu' && nameFocused) {
+    if (e.key === 'Enter') {
+      nameFocused = false;
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'Backspace') {
+      nameInput = nameInput.slice(0, -1);
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'Escape') {
+      nameFocused = false;
+      e.preventDefault();
+      return;
+    }
+    if (e.key.length === 1 && nameInput.length < 12 && !e.ctrlKey && !e.metaKey) {
+      nameInput += e.key;
+      e.preventDefault();
+      return;
+    }
+    return;
+  }
+
+  // Command bar (open with /)
+  if (commandOpen) {
+    if (e.key === 'Enter') {
+      executeCommand(commandText);
+      commandText = '';
+      commandOpen = false;
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'Backspace') {
+      commandText = commandText.slice(0, -1);
+      if (commandText.length === 0) commandOpen = false;
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'Escape') {
+      commandOpen = false;
+      commandText = '';
+      e.preventDefault();
+      return;
+    }
+    if (e.key.length === 1 && commandText.length < 40) {
+      commandText += e.key;
+      e.preventDefault();
+      return;
+    }
+    return;
+  }
+
+  // Open command bar with /
+  if (e.key === '/' && !shopOpen && gameState === 'playing' && !gameOver) {
+    commandOpen = true;
+    commandText = '/';
+    e.preventDefault();
+    return;
+  }
+
+  if (shopOpen) {
+    if (e.key === 'Enter') {
+      executeCommand(commandText);
+      commandText = '';
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'Backspace') {
+      commandText = commandText.slice(0, -1);
+      e.preventDefault();
+      return;
+    }
+    if (e.key.length === 1 && commandText.length < 40) {
+      commandText += e.key;
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'Escape') {
+      shopOpen = false;
+      return;
+    }
+    return; // block other keys in shop
+  }
+
+  const k = e.key.toLowerCase();
+  keys[k] = true;
+  if (['w','a','s','d'].includes(k)) e.preventDefault();
+
+  if ((k === 'escape' || k === 'b') && gameState === 'playing') shopOpen = !shopOpen;
+
+  const now = performance.now() / 1000;
+
+  if (k === 't' && tUnlocked && (opFun || now - lastTeleport >= TELEPORT_CD)) {
+    teleportToClosest();
+    if (!opFun) lastTeleport = now;
+  }
+
+  if (k === 'r' && rUnlocked && (opFun || now - lastSizeBoost >= SIZE_CD)) {
+    sizeBoostActive = true;
+    sizeBoostEnd = now + SIZE_DURATION;
+    if (!opFun) lastSizeBoost = now;
+    player.size = BASE_SIZE * 3;
+  }
+
+  if (k === 'y' && yUnlocked && (opFun || (score - scoreAtLastSuper) >= SUPER_COST) && !dragonActive) {
+    startDragon();
+    if (!opFun) scoreAtLastSuper = score;
+  }
+
+  if (k === 'q' && qUnlocked && (opFun || now - lastDash >= DASH_CD) && !dashActive) {
+    dashActive = true;
+    dashTime = DASH_DURATION;
+    player.size = BASE_SIZE * 4;
+    if (!opFun) lastDash = now;
+  }
+
+  // Space auto-shoot (hold to fire)
+  if (keys[' '] && now - lastSpace >= (SPACE_COOLDOWN / shootSpeedMultiplier)) {
+    autoShoot();
+    lastSpace = now;
+  }
+});
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+function goToHome() {
+  gameState = 'menu';
+  gameOver = false;
+  shopOpen = false;
+  commandOpen = false;
+  enemies = [];
+  enemyBullets = [];
+  minions = [];
+  playerBullets = [];
+  upgrades = [];
+  items = [];
+  for (let i = 0; i < 6; i++) spawnItem();
+  updateNavBtn();
+}
+
+function goToWebsite() {
+  window.location.href = WEBSITE_HOME;
+}
+
+function updateNavBtn() {
+  const btn = document.getElementById('navBtn');
+  if (!btn) return;
+  btn.textContent = '< home';
+}
+updateNavBtn();
+
+document.getElementById('navBtn').addEventListener('click', (e) => {
+  e.preventDefault();
+  goToWebsite();
+});
+
+function startGame() {
+  // Full reset then start from selected wave
+  health = MAX_HEALTH + extraMaxHealth;
+  stamina = MAX_STAMINA;
+  player.x = W / 2;
+  player.y = H / 2;
+  player.size = BASE_SIZE;
+  player.speed = BASE_SPEED;
+  window._customSpeed = null;
+  score = 0;
+  scoreAtLastSuper = 0;
+  tUnlocked = false;
+  rUnlocked = false;
+  yUnlocked = false;
+  qUnlocked = false;
+  permanentPowers = [];
+  scoreMultiplier = 1;
+  extraMaxHealth = 0;
+  speedMultiplier = 1;
+  shootSpeedMultiplier = 1;
+  touchKill = false;
+  upgrades = [];
+  enemies = [];
+  enemyBullets = [];
+  minions = [];
+  playerBullets = [];
+  sizeBoostActive = false;
+  dragonActive = false;
+  stunned = false;
+  stunTime = 0;
+  forceField = false;
+  opFun = false;
+  playTime = 0;
+  moveTime = 0;
+
+  waveNumber = Math.max(0, startWave - 1);
+  waveClearTimer = 0.8;
+  waveMessage = '';
+  waveMessageTimer = 0;
+
+  gameOver = false;
+  gameState = 'playing';
+  shopOpen = false;
+  commandOpen = false;
+  updateNavBtn();
+}
+
+function respawn() {
+  // Quick restart with same settings (keeps skin + startWave + peaceful)
+  health = MAX_HEALTH;
+  stamina = MAX_STAMINA;
+  player.x = W / 2;
+  player.y = H / 2;
+  player.size = BASE_SIZE;
+  player.speed = BASE_SPEED;
+  window._customSpeed = null;
+  score = 0;
+  scoreAtLastSuper = 0;
+  tUnlocked = false;
+  rUnlocked = false;
+  yUnlocked = false;
+  qUnlocked = false;
+  permanentPowers = [];
+  scoreMultiplier = 1;
+  extraMaxHealth = 0;
+  speedMultiplier = 1;
+  shootSpeedMultiplier = 1;
+  touchKill = false;
+  upgrades = [];
+  enemies = [];
+  enemyBullets = [];
+  minions = [];
+  playerBullets = [];
+  sizeBoostActive = false;
+  dragonActive = false;
+  stunned = false;
+  stunTime = 0;
+  forceField = false;
+
+  waveNumber = Math.max(0, startWave - 1);
+  waveClearTimer = 1.5;
+  waveMessage = '';
+  waveMessageTimer = 0;
+
+  gameOver = false;
+  gameState = 'playing';
+  shopOpen = false;
+  updateNavBtn();
+}
+
+function spawnUpgrade() {
+  const roll = Math.random();
+  let cumulative = 0;
+  let chosen = UPGRADE_TYPES[0];
+  for (const up of UPGRADE_TYPES) {
+    cumulative += up.chance;
+    if (roll <= cumulative) {
+      chosen = up;
+      break;
+    }
+  }
+  upgrades.push({
+    x: Math.random() * (W - 60) + 30,
+    y: Math.random() * (H - 60) + 30,
+    type: chosen.id,
+    name: chosen.name,
+    color: chosen.color,
+    life: 25
+  });
+}
+
+function applyUpgrade(type) {
+  if (type === 'health') {
+    extraMaxHealth += 50;
+    health = Math.min(health + 50, MAX_HEALTH + extraMaxHealth);
+    commandMessage = '+50% MAX HP!';
+  } else if (type === 'speed') {
+    speedMultiplier = 2;
+    commandMessage = '2X SPEED!';
+  } else if (type === 'shoot') {
+    shootSpeedMultiplier = 2;
+    commandMessage = '2X SHOOTING!';
+  } else if (type === 'touch') {
+    touchKill = true;
+    commandMessage = 'TOUCH KILL UNLOCKED!';
+  }
+  setTimeout(() => { commandMessage = ''; }, 2500);
+}
+
+function teleportToClosest() {
+  if (items.length === 0) return;
+
+  const sorted = items.map((it, idx) => ({
+    it, idx,
+    dist: Math.hypot(player.x - it.x, player.y - it.y)
+  })).sort((a, b) => a.dist - b.dist);
+
+  const toCollect = sorted.slice(0, 3);
+
+  toCollect.forEach(obj => {
+    score += obj.it.value * scoreMultiplier;
+  });
+
+  const indices = toCollect.map(o => o.idx).sort((a,b) => b - a);
+  indices.forEach(i => items.splice(i, 1));
+
+  if (toCollect.length > 0) {
+    const last = toCollect[toCollect.length - 1].it;
+    player.x = last.x;
+    player.y = last.y;
+  }
+
+  for (let i = 0; i < toCollect.length; i++) spawnItem();
+}
+
+function autoShoot() {
+  if (enemies.length === 0) return;
+  // Find closest enemy for auto-aim
+  let closest = null;
+  let minDist = Infinity;
+  enemies.forEach(en => {
+    const d = Math.hypot(player.x - en.x, player.y - en.y);
+    if (d < minDist) {
+      minDist = d;
+      closest = en;
+    }
+  });
+  if (!closest) return;
+
+  // Spawn a fast auto-homing bullet
+  const dx = closest.x - player.x;
+  const dy = closest.y - player.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  playerBullets.push({
+    x: player.x,
+    y: player.y,
+    vx: (dx / dist) * 420,
+    vy: (dy / dist) * 420,
+    target: closest,
+    life: 2.5
+  });
+}
+
+function spawnWave() {
+  if (enemies.length >= MAX_SHIPS) return;
+
+  waveNumber++;
+  waveMessage = 'NEXT WAVE ' + waveNumber;
+  waveMessageTimer = 3.5;
+  minions = []; // clear leftover minions
+
+  const isBossWave = (waveNumber % 5 === 0);
+  const isSuperBoss = (waveNumber === 25);
+
+  if (isSuperBoss) {
+    // Super Boss
+    enemies.push({
+      x: W/2,
+      y: -50,
+      vx: 0, vy: 0,
+      hp: 80 + Math.floor(playTime / 10),
+      maxHp: 80 + Math.floor(playTime / 10),
+      isBoss: true,
+      isSuperBoss: true,
+      shootTimer: 0.3,
+      beamTimer: 7.5,
+      forceTimer: 10,
+      forceActive: false,
+      forceTimeLeft: 0,
+      attackMode: 0,
+      modeTimer: 0,
+      minionTimer: 2
+    });
+  } else if (isBossWave) {
+    // Boss
+    const side = Math.floor(Math.random() * 4);
+    let x, y;
+    if (side === 0) { x = W/2; y = -30; }
+    else if (side === 1) { x = W + 30; y = H/2; }
+    else if (side === 2) { x = W/2; y = H + 30; }
+    else { x = -30; y = H/2; }
+    enemies.push({
+      x, y,
+      vx: 0, vy: 0,
+      hp: Math.floor((8 + waveNumber * 2) * (1 + playTime / 180)),
+      maxHp: Math.floor((8 + waveNumber * 2) * (1 + playTime / 180)),
+      isBoss: true,
+      shootTimer: 0.5,
+      attackMode: 0,
+      modeTimer: 0,
+      minionTimer: 3
+    });
+  } else {
+    const count = Math.min(2 + Math.floor(waveNumber / 2), MAX_SHIPS - enemies.length);
+    for (let i = 0; i < count; i++) {
+      const side = Math.floor(Math.random() * 4);
+      let x, y;
+      if (side === 0) { x = Math.random() * W; y = -20; }
+      else if (side === 1) { x = W + 20; y = Math.random() * H; }
+      else if (side === 2) { x = Math.random() * W; y = H + 20; }
+      else { x = -20; y = Math.random() * H; }
+      enemies.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 40,
+        vy: (Math.random() - 0.5) * 40,
+        hp: Math.floor((waveNumber >= 25 ? 5 : (waveNumber >= 15 ? 2 : 1)) * (1 + playTime / 120)),
+        maxHp: Math.floor((waveNumber >= 25 ? 5 : (waveNumber >= 15 ? 2 : 1)) * (1 + playTime / 120)),
+        isBoss: false,
+        isElite: waveNumber >= 15,
+        isYellow: waveNumber >= 25,
+        shootTimer: Math.random() * ENEMY_SHOOT_INTERVAL
+      });
+    }
+  }
+}
+
+function startDragon() {
+  dragonActive = true;
+  dragonTime = 0;
+  dragonX = -150;
+  items.forEach(it => score += it.value * scoreMultiplier);
+  items = [];
+  for (let i = 0; i < 6; i++) spawnItem();
+}
+
+function activateRandomPower() {
+  if (rolling) return;
+  rolling = true;
+  rollTimer = 0;
+  finalPower = '';
+  rollSpeed = 0.08; // start fast
+
+  const roll = Math.random() * 100;
+  let type = 'nothing';
+
+  if (roll < 22) type = '1.5x';
+  else if (roll < 34) type = '2x';
+  else if (roll < 44) type = 'size';
+  else if (roll < 54) type = 'nothing';
+  else if (roll < 64) type = 'speed';
+  else if (roll < 74) type = 'magnet';
+  else if (roll < 84) type = 'spawn';
+  else if (roll < 92) type = 'score';
+  else type = 'mega';
+
+  finalPower = type;
+
+  // Decelerating roll: total ~2s spin + 1s hold
+  let elapsed = 0;
+  const spinDuration = 2000;
+  const interval = setInterval(() => {
+    elapsed += 50;
+    rollTimer = elapsed;
+    // slow down
+    if (elapsed > 1200) rollSpeed = 0.2;
+    if (elapsed > 1600) rollSpeed = 0.4;
+
+    if (elapsed >= spinDuration) {
+      clearInterval(interval);
+      rolling = false;
+      applyPermanentPower(type);
+      // hold the result for 1 second
+      setTimeout(() => { finalPower = ''; }, 1000);
+    }
+  }, 50);
+}
+
+function applyPermanentPower(type) {
+  if (type === 'nothing') return;
+
+  if (!permanentPowers.includes(type)) {
+    permanentPowers.push(type);
+  }
+
+  if (type === '1.5x' || type === '2x') {
+    // higher multiplier wins
+    if (type === '2x') scoreMultiplier = Math.max(scoreMultiplier, 2);
+    else scoreMultiplier = Math.max(scoreMultiplier, 1.5);
+  } else if (type === 'size') {
+    player.size = Math.max(player.size, BASE_SIZE * 1.5);
+  } else if (type === 'speed') {
+    player.speed += 1.5;
+  } else if (type === 'score') {
+    score += 1000;
+  } else if (type === 'spawn') {
+    // handled in update: more + faster items
+  } else if (type === 'mega') {
+    player.size = Math.max(player.size, BASE_SIZE * 2);
+    player.speed += 2.5;
+  }
+  // magnet is permanent and handled in update
+}
+
+function executeCommand(cmd) {
+  const parts = cmd.trim().toLowerCase().split(/\s+/);
+  if (parts.length === 0) return;
+
+  if (parts[0] === '/score' && parts[1]) {
+    const num = parseInt(parts[1]);
+    if (!isNaN(num) && num >= 0) {
+      score = num;
+      commandMessage = 'Score gezet op ' + num;
+    } else {
+      commandMessage = 'Ongeldig nummer (gebruik bijv. /score 5000)';
+    }
+  } else if (parts[0] === '/unlock' && parts[1]) {
+    const ab = parts[1].toUpperCase();
+    if (ab === 'T') {
+      tUnlocked = true;
+      commandMessage = 'T unlocked!';
+    } else if (ab === 'R') {
+      rUnlocked = true;
+      commandMessage = 'R unlocked!';
+    } else if (ab === 'Y') {
+      yUnlocked = true;
+      commandMessage = 'Y unlocked!';
+    } else {
+      commandMessage = 'Onbekende ability. Gebruik: /unlock T , /unlock R of /unlock Y';
+    }
+  } else if (parts[0] === '/wave' && parts[1]) {
+    const num = parseInt(parts[1]);
+    if (!isNaN(num) && num >= 1) {
+      waveNumber = num - 1; // next spawn will be this wave
+      enemies = [];
+      enemyBullets = [];
+      minions = [];
+      playerBullets = [];
+      waveClearTimer = 0.5;
+      waveMessage = 'WAVE SET TO ' + num;
+      waveMessageTimer = 3;
+      commandMessage = 'Wave set to ' + num;
+    } else {
+      commandMessage = 'Ongeldig nummer (gebruik bijv. /wave 15)';
+    }
+  } else if (parts[0] === '/opfun') {
+    opFun = true;
+    commandMessage = 'OP FUN ON - no cooldowns!';
+  } else if (parts[0] === '/unopfun') {
+    opFun = false;
+    commandMessage = 'OP FUN OFF - cooldowns back';
+  } else if (parts[0] === '/ff') {
+    forceField = true;
+    health = MAX_HEALTH;
+    commandMessage = 'FORCEFIELD ON - infinite health';
+  } else if (parts[0] === '/unff') {
+    forceField = false;
+    commandMessage = 'FORCEFIELD OFF';
+  } else if (parts[0] === '/multi' && parts[1]) {
+    const num = parseFloat(parts[1]);
+    if (!isNaN(num) && num > 0) {
+      scoreMultiplier = num;
+      commandMessage = 'Multiplier set to ' + num + 'x';
+    } else {
+      commandMessage = 'Use /multi 2 (or any positive number)';
+    }
+  } else if (parts[0] === '/size' && parts[1]) {
+    const num = parseFloat(parts[1]);
+    if (!isNaN(num) && num > 0) {
+      player.size = num;
+      commandMessage = 'Size set to ' + num;
+    } else {
+      commandMessage = 'Use /size 20 (or any positive number)';
+    }
+  } else if (parts[0] === '/speed' && parts[1]) {
+    const num = parseFloat(parts[1]);
+    if (!isNaN(num) && num > 0) {
+      player.speed = num;
+      // Also set a base so it doesn't immediately get overwritten
+      window._customSpeed = num;
+      commandMessage = 'Speed set to ' + num;
+    } else {
+      commandMessage = 'Use /speed 5 (or any positive number)';
+    }
+  } else {
+    commandMessage = 'Onbekend commando. Probeer /score /unlock /wave /opfun /ff /multi /size /speed';
+  }
+  setTimeout(() => { commandMessage = ''; }, 3000);
+}
+
+function getPowerLabel(type) {
+  if (type === '1.5x') return '1.5X PUNTEN';
+  if (type === '2x') return '2X PUNTEN';
+  if (type === 'size') return '1.5X GROOT';
+  if (type === 'speed') return 'SPEED+';
+  if (type === 'magnet') return 'MAGNET';
+  if (type === 'score') return '+SCORE';
+  if (type === 'spawn') return 'MEER SPAWN';
+  if (type === 'mega') return '2X GROOT+SNEL';
+  if (type === 'nothing') return 'NIKS';
+  return type;
+}
+
+let lastTime = performance.now();
+
+function update(delta) {
+  if (gameState !== 'playing' || shopOpen || gameOver || commandOpen) return; // only update while playing
+
+  const now = performance.now() / 1000;
+  playTime += delta;
+
+  if (sizeBoostActive && now >= sizeBoostEnd) {
+    sizeBoostActive = false;
+    player.size = BASE_SIZE;
+  }
+
+  // Permanent magnet
+  if (permanentPowers.includes('magnet')) {
+    items.forEach(it => {
+      const dx = player.x - it.x;
+      const dy = player.y - it.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 220 && dist > 5) {
+        it.x += (dx / dist) * 2.2;
+        it.y += (dy / dist) * 2.2;
+      }
+    });
+  }
+
+  if (dragonActive) {
+    dragonTime += delta;
+    dragonX += 400 * delta;
+    if (dragonX > W + 150) {
+      dragonActive = false;
+    }
+  }
+
+  // Stun effect
+  if (stunned) {
+    stunTime -= delta;
+    if (stunTime <= 0) stunned = false;
+  }
+
+  const isMoving = keys['w'] || keys['a'] || keys['s'] || keys['d'] ||
+                   keys['arrowup'] || keys['arrowleft'] || keys['arrowdown'] || keys['arrowright'];
+
+  const boosting = !stunned && (keys['shift'] || keys['shiftleft'] || keys['shiftright']) && stamina > 0 && isMoving && !shopOpen;
+
+  if (boosting) {
+    stamina = Math.max(0, stamina - STAMINA_DRAIN * delta);
+  } else {
+    stamina = Math.min(MAX_STAMINA, stamina + STAMINA_REGEN * delta);
+  }
+
+  if (isMoving) {
+    moveTime += delta;
+    let base = BASE_SPEED + Math.min(moveTime * 0.05, 1.5);
+    base *= speedMultiplier;
+    if (window._customSpeed) base = window._customSpeed;
+    player.speed = boosting ? base * BOOST_MULTIPLIER : base;
+  } else {
+    moveTime = Math.max(0, moveTime - delta * 0.5);
+    player.speed = window._customSpeed || BASE_SPEED;
+  }
+
+  let nx = player.x;
+  let ny = player.y;
+
+  if (!stunned) {
+    if (keys['w'] || keys['arrowup']) ny -= player.speed;
+    if (keys['s'] || keys['arrowdown']) ny += player.speed;
+    if (keys['a'] || keys['arrowleft']) nx -= player.speed;
+    if (keys['d'] || keys['arrowright']) nx += player.speed;
+  }
+
+  if (nx < 0) nx += W;
+  if (nx > W) nx -= W;
+  if (ny < 0) ny += H;
+  if (ny > H) ny -= H;
+
+  player.x = nx;
+  player.y = ny;
+
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    const dx = player.x - it.x;
+    const dy = player.y - it.y;
+    if (Math.hypot(dx, dy) < player.size + 12) {
+      score += it.value * scoreMultiplier;
+      items.splice(i, 1);
+      spawnItem();
+    }
+  }
+
+  // Touch kill
+  if (touchKill) {
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      const en = enemies[i];
+      if (Math.hypot(player.x - en.x, player.y - en.y) < player.size + (en.isBoss ? 30 : 16)) {
+        en.hp -= 2;
+        score += 20 * scoreMultiplier;
+        if (en.hp <= 0) {
+          enemies.splice(i, 1);
+          score += 40 * scoreMultiplier;
+        }
+      }
+    }
+  }
+
+  const maxItems = 5 + Math.floor(playTime / 20) + (permanentPowers.includes('spawn') ? 6 : 0);
+  const spawnChance = 0.01 + Math.min(playTime / 200, 0.03) + (permanentPowers.includes('spawn') ? 0.04 : 0);
+  if (items.length < maxItems && Math.random() < spawnChance) spawnItem();
+
+  // Spawn upgrades occasionally (harder over time)
+  lastUpgradeSpawn += delta;
+  if (lastUpgradeSpawn > 18 + Math.random() * 10 && upgrades.length < 3) {
+    spawnUpgrade();
+    lastUpgradeSpawn = 0;
+  }
+
+  // Collect upgrades
+  for (let i = upgrades.length - 1; i >= 0; i--) {
+    const up = upgrades[i];
+    up.life -= delta;
+    if (up.life <= 0) {
+      upgrades.splice(i, 1);
+      continue;
+    }
+    if (Math.hypot(player.x - up.x, player.y - up.y) < player.size + 18) {
+      applyUpgrade(up.type);
+      upgrades.splice(i, 1);
+    }
+  }
+
+  // Enemy waves – start next wave only after previous is cleared
+  if (!peacefulMode) {
+    if (enemies.length === 0) {
+      waveClearTimer += delta;
+      if (waveClearTimer > 2.5) {
+        spawnWave();
+        waveClearTimer = 0;
+      }
+    } else {
+      waveClearTimer = 0;
+    }
+  } else {
+    // Peaceful mode: clear any remaining enemies slowly
+    if (enemies.length > 0) enemies = [];
+    if (minions.length > 0) minions = [];
+    if (enemyBullets.length > 0) enemyBullets = [];
+  }
+
+  if (waveMessageTimer > 0) waveMessageTimer -= delta;
+
+  // Update enemies
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const en = enemies[i];
+    const dx = player.x - en.x;
+    const dy = player.y - en.y;
+    const dist = Math.hypot(dx, dy) || 1;
+
+    // Desired distance: normal ships get closer, bosses stay further
+    const maxSpeed = en.isSuperBoss ? 160 : (en.isBoss ? 70 : 95);
+    const desiredDist = en.isSuperBoss ? 140 : (en.isBoss ? 180 : 90);
+
+    let ax = 0;
+    let ay = 0;
+
+    if (dist > desiredDist + 30) {
+      // Too far → chase
+      ax = (dx / dist) * (en.isBoss ? 90 : 140);
+      ay = (dy / dist) * (en.isBoss ? 90 : 140);
+    } else if (dist < desiredDist - 20) {
+      // Too close → back off a bit
+      ax = -(dx / dist) * 80;
+      ay = -(dy / dist) * 80;
+    } else {
+      // Good range → strafe sideways
+      const side = (i % 2 === 0) ? 1 : -1;
+      ax = (-dy / dist) * 60 * side;
+      ay = (dx / dist) * 60 * side;
+    }
+
+    en.vx += ax * delta;
+    en.vy += ay * delta;
+
+    // Cap speed
+    const speed = Math.hypot(en.vx, en.vy);
+    if (speed > maxSpeed) {
+      en.vx = (en.vx / speed) * maxSpeed;
+      en.vy = (en.vy / speed) * maxSpeed;
+    }
+
+    // Light drag
+    en.vx *= 0.985;
+    en.vy *= 0.985;
+
+    en.x += en.vx * delta;
+    en.y += en.vy * delta;
+
+    // Stay on screen (soft bounce)
+    const margin = en.isBoss ? 40 : 20;
+    if (en.x < margin) { en.x = margin; en.vx = Math.abs(en.vx) * 0.5; }
+    if (en.x > W - margin) { en.x = W - margin; en.vx = -Math.abs(en.vx) * 0.5; }
+    if (en.y < margin) { en.y = margin; en.vy = Math.abs(en.vy) * 0.5; }
+    if (en.y > H - margin) { en.y = H - margin; en.vy = -Math.abs(en.vy) * 0.5; }
+
+    // Shoot (aim at player, slight lead)
+    en.shootTimer -= delta;
+    if (en.shootTimer <= 0) {
+      // Predict player position a little
+      const lead = Math.min(dist / 200, 0.4);
+      const tx = player.x + (keys['d'] || keys['arrowright'] ? 40 : keys['a'] || keys['arrowleft'] ? -40 : 0) * lead;
+      const ty = player.y + (keys['s'] || keys['arrowdown'] ? 40 : keys['w'] || keys['arrowup'] ? -40 : 0) * lead;
+      const bdx = tx - en.x;
+      const bdy = ty - en.y;
+      const bd = Math.hypot(bdx, bdy) || 1;
+
+      if (en.isSuperBoss) {
+        // Super boss BIG lightning beams every 7.5s that stun
+        // 3-second charge-up warning before firing
+        en.beamTimer -= delta;
+
+        if (en.beamTimer <= 3 && en.beamTimer > 0) {
+          // Charging phase
+          en.charging = true;
+        } else {
+          en.charging = false;
+        }
+
+        if (en.beamTimer <= 0) {
+          const ang = Math.atan2(bdy, bdx);
+          // Big continuous lightning beam (many large bolts)
+          for (let i = 0; i < 20; i++) {
+            enemyBullets.push({
+              x: en.x + Math.cos(ang) * i * 35,
+              y: en.y + Math.sin(ang) * i * 35,
+              vx: Math.cos(ang) * 400,
+              vy: Math.sin(ang) * 400,
+              isBeam: true,
+              isLightning: true
+            });
+          }
+          en.beamTimer = 7.5;
+          en.charging = false;
+          commandMessage = 'LIGHTNING BEAM!';
+          setTimeout(() => { if (commandMessage === 'LIGHTNING BEAM!') commandMessage = ''; }, 1500);
+        }
+
+        // Forcefield every 10 seconds for 3 seconds (regen up to 50%)
+        en.forceTimer -= delta;
+        if (en.forceActive) {
+          en.forceTimeLeft -= delta;
+          const regenTarget = en.maxHp * 0.5;
+          if (en.hp < regenTarget) {
+            en.hp = Math.min(regenTarget, en.hp + 12 * delta);
+          }
+          if (en.forceTimeLeft <= 0) {
+            en.forceActive = false;
+            en.forceTimer = 10;
+          }
+        } else if (en.forceTimer <= 0) {
+          en.forceActive = true;
+          en.forceTimeLeft = 3;
+        }
+
+        // Also fast normal shots
+        enemyBullets.push({
+          x: en.x, y: en.y,
+          vx: (bdx / bd) * 220,
+          vy: (bdy / bd) * 220
+        });
+        en.shootTimer = 0.3;
+      } else if (en.isBoss) {
+        en.modeTimer -= delta;
+        if (en.modeTimer <= 0) {
+          en.attackMode = (en.attackMode + 1) % 3;
+          en.modeTimer = 4 + Math.random() * 2;
+        }
+
+        if (en.attackMode === 0) {
+          for (let a = -1; a <= 1; a++) {
+            const ang = Math.atan2(bdy, bdx) + a * 0.22;
+            enemyBullets.push({
+              x: en.x, y: en.y,
+              vx: Math.cos(ang) * 170,
+              vy: Math.sin(ang) * 170
+            });
+          }
+          en.shootTimer = 0.85;
+        } else if (en.attackMode === 1) {
+          for (let a = 0; a < 8; a++) {
+            const ang = (Math.PI * 2 / 8) * a + (performance.now() / 1000);
+            enemyBullets.push({
+              x: en.x, y: en.y,
+              vx: Math.cos(ang) * 130,
+              vy: Math.sin(ang) * 130
+            });
+          }
+          en.shootTimer = 1.5;
+        } else {
+          enemyBullets.push({
+            x: en.x, y: en.y,
+            vx: (bdx / bd) * 230,
+            vy: (bdy / bd) * 230
+          });
+          en.shootTimer = 0.5;
+        }
+
+        en.minionTimer -= delta;
+        if (en.minionTimer <= 0 && minions.length < 6) {
+          minions.push({
+            x: en.x,
+            y: en.y,
+            vx: (Math.random() - 0.5) * 80,
+            vy: (Math.random() - 0.5) * 80
+          });
+          en.minionTimer = 2.6 + Math.random() * 1.4;
+        }
+      } else {
+        enemyBullets.push({
+          x: en.x,
+          y: en.y,
+          vx: (bdx / bd) * 155,
+          vy: (bdy / bd) * 155
+        });
+        en.shootTimer = ENEMY_SHOOT_INTERVAL + Math.random() * 0.5;
+      }
+    }
+  }
+
+  // Update enemy bullets
+  for (let i = enemyBullets.length - 1; i >= 0; i--) {
+    const b = enemyBullets[i];
+    b.x += b.vx * delta;
+    b.y += b.vy * delta;
+    // Hit player?
+    if (Math.hypot(b.x - player.x, b.y - player.y) < player.size + (b.isLightning ? 30 : 6)) {
+      if (!forceField) {
+        health = Math.max(0, health - (b.isLightning ? 12 : ENEMY_DAMAGE));
+        if (b.isLightning && !stunned) {
+          stunned = true;
+          stunTime = 1.6;
+        }
+      }
+      enemyBullets.splice(i, 1);
+      continue;
+    }
+    if (b.x < -20 || b.x > W + 20 || b.y < -20 || b.y > H + 20) {
+      enemyBullets.splice(i, 1);
+    }
+  }
+
+  // Update minions
+  for (let i = minions.length - 1; i >= 0; i--) {
+    const m = minions[i];
+    const dx = player.x - m.x;
+    const dy = player.y - m.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    // Stronger chase
+    m.vx += (dx / dist) * 180 * delta;
+    m.vy += (dy / dist) * 180 * delta;
+    const spd = Math.hypot(m.vx, m.vy);
+    if (spd > 140) {
+      m.vx = (m.vx / spd) * 140;
+      m.vy = (m.vy / spd) * 140;
+    }
+    m.vx *= 0.98;
+    m.vy *= 0.98;
+    m.x += m.vx * delta;
+    m.y += m.vy * delta;
+
+    // Hit player → deal damage and die
+    if (dist < player.size + 14) {
+      if (!forceField) health = Math.max(0, health - 8);
+      minions.splice(i, 1);
+      continue;
+    }
+    if (m.x < -40 || m.x > W + 40 || m.y < -40 || m.y > H + 40) {
+      minions.splice(i, 1);
+    }
+  }
+
+  // Update player bullets (auto-homing)
+  for (let i = playerBullets.length - 1; i >= 0; i--) {
+    const b = playerBullets[i];
+    b.life -= delta;
+    // Re-home on target if still alive
+    if (b.target && enemies.includes(b.target)) {
+      const dx = b.target.x - b.x;
+      const dy = b.target.y - b.y;
+      const d = Math.hypot(dx, dy) || 1;
+      b.vx = (dx / d) * 420;
+      b.vy = (dy / d) * 420;
+    }
+    b.x += b.vx * delta;
+    b.y += b.vy * delta;
+
+    // Hit any enemy
+    let hit = false;
+    for (let j = enemies.length - 1; j >= 0; j--) {
+      const en = enemies[j];
+      if (Math.hypot(b.x - en.x, b.y - en.y) < (en.isBoss ? 28 : 16) + (sizeBoostActive ? 8 : 0)) {
+        en.hp -= sizeBoostActive ? 3 : 1;
+        score += 30 * scoreMultiplier;
+        if (en.hp <= 0) {
+          if (en.isSuperBoss && !qUnlocked) {
+            qUnlocked = true;
+            commandMessage = 'Q ABILITY UNLOCKED!';
+            setTimeout(() => { commandMessage = ''; }, 3000);
+          }
+          enemies.splice(j, 1);
+          score += 60 * scoreMultiplier;
+        }
+        hit = true;
+        break;
+      }
+    }
+    if (hit || b.life <= 0 || b.x < -30 || b.x > W + 30 || b.y < -30 || b.y > H + 30) {
+      playerBullets.splice(i, 1);
+    }
+  }
+
+  // Dash ability
+  if (dashActive) {
+    dashTime -= delta;
+    // Move fast in facing direction (last movement)
+    const dashSpeed = 320;
+    if (keys['w'] || keys['arrowup']) player.y -= dashSpeed * delta;
+    if (keys['s'] || keys['arrowdown']) player.y += dashSpeed * delta;
+    if (keys['a'] || keys['arrowleft']) player.x -= dashSpeed * delta;
+    if (keys['d'] || keys['arrowright']) player.x += dashSpeed * delta;
+
+    // Kill everything we pass
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      const en = enemies[i];
+      if (Math.hypot(player.x - en.x, player.y - en.y) < player.size + 30) {
+        if (en.isSuperBoss && !qUnlocked) {
+          qUnlocked = true;
+          commandMessage = 'Q ABILITY UNLOCKED!';
+          setTimeout(() => { commandMessage = ''; }, 3000);
+        }
+        enemies.splice(i, 1);
+        score += 100 * scoreMultiplier;
+      }
+    }
+    for (let i = minions.length - 1; i >= 0; i--) {
+      if (Math.hypot(player.x - minions[i].x, player.y - minions[i].y) < player.size + 20) {
+        minions.splice(i, 1);
+      }
+    }
+
+    if (dashTime <= 0) {
+      dashActive = false;
+      player.size = BASE_SIZE;
+    }
+  }
+  if (!forceField && health <= 0 && !gameOver) {
+    gameOver = true;
+    gameState = 'gameOver';
+    leaderboard = saveToLeaderboard(playerName, score, waveNumber);
+    enemies = [];
+    enemyBullets = [];
+    minions = [];
+    playerBullets = [];
+  }
+}
+
+function drawPlayer(x, y, size, color, shape) {
+  ctx.fillStyle = color;
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1.5;
+
+  if (shape === 'triangle') {
+    ctx.beginPath();
+    ctx.moveTo(x, y - size);
+    ctx.lineTo(x - size, y + size);
+    ctx.lineTo(x + size, y + size);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  } else if (shape === 'pentagon') {
+    ctx.beginPath();
+    for (let i = 0; i < 5; i++) {
+      const ang = (Math.PI * 2 / 5) * i - Math.PI / 2;
+      const px = x + Math.cos(ang) * size;
+      const py = y + Math.sin(ang) * size;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  } else if (shape === 'circle') {
+    ctx.beginPath();
+    ctx.arc(x, y, size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    // square (default)
+    ctx.fillRect(x - size, y - size, size * 2, size * 2);
+    ctx.strokeRect(x - size, y - size, size * 2, size * 2);
+  }
+
+  // small letter
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 11px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('S', x, y + 4);
+  ctx.textAlign = 'left';
+}
+
+function drawMatrix() {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#0f0';
+  ctx.font = fontSize + 'px monospace';
+
+  for (let i = 0; i < drops.length; i++) {
+    const text = chars[Math.floor(Math.random() * chars.length)];
+    ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+
+    if (drops[i] * fontSize > H && Math.random() > 0.975) {
+      drops[i] = 0;
+    }
+    drops[i]++;
+  }
+}
+
+function drawDragon() {
+  if (!dragonActive) return;
+  ctx.save();
+  ctx.translate(dragonX, H/2);
+  ctx.fillStyle = '#0f0';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 60, 25, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(50, -5, 25, 18, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = '#0a0';
+  ctx.beginPath();
+  ctx.moveTo(-20, 0);
+  ctx.lineTo(-40, -40);
+  ctx.lineTo(10, -10);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(-10, 0);
+  ctx.lineTo(20, -50);
+  ctx.lineTo(30, -5);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 16px monospace';
+  ctx.fillText('DRAAK', -25, 5);
+  ctx.restore();
+}
+
+function drawShop() {
+  if (!shopOpen) return;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 28px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('SHOP', W/2, 70);
+
+  ctx.font = '18px monospace';
+
+  // T
+  ctx.fillStyle = tUnlocked ? '#0a0' : (score >= T_PRICE ? '#0f0' : '#f00');
+  ctx.fillText('T Teleport - ' + (tUnlocked ? 'GEKOCHT' : T_PRICE + ' punten'), W/2, 120);
+
+  // R
+  ctx.fillStyle = rUnlocked ? '#0a0' : (score >= R_PRICE ? '#0f0' : '#f00');
+  ctx.fillText('R 3x Groot - ' + (rUnlocked ? 'GEKOCHT' : R_PRICE + ' punten'), W/2, 170);
+
+  // Y
+  ctx.fillStyle = yUnlocked ? '#0a0' : (score >= Y_PRICE ? '#0f0' : '#f00');
+  ctx.fillText('Y Draak Super - ' + (yUnlocked ? 'GEKOCHT' : Y_PRICE + ' punten'), W/2, 220);
+
+  // Random
+  ctx.fillStyle = score >= RANDOM_PRICE ? '#0f0' : '#f00';
+  ctx.fillText('Random Power (permanent + meer spawn etc.) - ' + RANDOM_PRICE + ' punten', W/2, 270);
+
+  // Blue mode button on the left
+  ctx.fillStyle = '#08f';
+  ctx.fillRect(20, 280, 160, 40);
+  ctx.strokeStyle = '#0af';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(20, 280, 160, 40);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 16px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(peacefulMode ? 'PEACEFUL' : 'WAVE MODE', 100, 306);
+  ctx.textAlign = 'left';
+
+  ctx.fillStyle = '#0f0';
+  ctx.font = '14px monospace';
+  ctx.fillText('Klik op een ability om te kopen • ESC om te sluiten', W/2, 310);
+  ctx.fillText('Score: ' + score, W/2, 330);
+
+  // Command bar
+  ctx.fillStyle = '#0a0';
+  ctx.fillRect(W/2 - 200, 350, 400, 30);
+  ctx.strokeStyle = '#0f0';
+  ctx.strokeRect(W/2 - 200, 350, 400, 30);
+  ctx.fillStyle = '#0f0';
+  ctx.font = '16px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('> ' + commandText + (Math.floor(Date.now()/500)%2 ? '_' : ''), W/2 - 190, 370);
+  ctx.textAlign = 'center';
+  if (commandMessage) {
+    ctx.fillStyle = '#ff0';
+    ctx.fillText(commandMessage, W/2, 400);
+  }
+  ctx.textAlign = 'left';
+
+  // Roll animation inside shop
+  if (rolling || finalPower) {
+    ctx.fillStyle = 'rgba(0, 20, 0, 0.9)';
+    ctx.fillRect(W/2 - 180, 420, 360, 70);
+    ctx.strokeStyle = '#0f0';
+    ctx.strokeRect(W/2 - 180, 420, 360, 70);
+    ctx.fillStyle = '#0f0';
+    ctx.font = 'bold 20px monospace';
+    ctx.textAlign = 'center';
+    let displayText = 'ROLLING...';
+    let bigText = ['1.5X', '2X', 'GROOT', 'SPEED', 'MAGNET', 'SPAWN', 'SCORE', 'MEGA', 'NIKS'][Math.floor(Math.random()*9)];
+    if (!rolling && finalPower) {
+      displayText = 'GEKREGEN!';
+      bigText = getPowerLabel(finalPower);
+    }
+    ctx.fillText(displayText, W/2, 445);
+    ctx.font = 'bold 28px monospace';
+    ctx.fillText(bigText, W/2, 475);
+    ctx.textAlign = 'left';
+  }
+}
+
+function drawMenu() {
+  // Full black + matrix
+  drawMatrix();
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Title
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 32px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('SUBWAY SERVERS HACK', W/2, 42);
+
+  // Name input
+  ctx.fillStyle = '#0a0';
+  ctx.font = '14px monospace';
+  ctx.fillText('JOUW NAAM (voor leaderboard)', W/2, 68);
+  ctx.fillStyle = nameFocused ? '#022' : '#011';
+  ctx.fillRect(W/2 - 140, 78, 280, 32);
+  ctx.strokeStyle = nameFocused ? '#0ff' : '#0f0';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(W/2 - 140, 78, 280, 32);
+  ctx.fillStyle = '#0f0';
+  ctx.font = '18px monospace';
+  const nameDisplay = (nameInput || '') + (nameFocused && Math.floor(Date.now()/500)%2 ? '_' : '');
+  ctx.fillText(nameDisplay || 'Klik om naam in te vullen', W/2, 100);
+
+  // Wave selector
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 16px monospace';
+  ctx.fillText('START WAVE', W/2, 130);
+
+  // - button
+  ctx.fillStyle = '#0a0';
+  ctx.fillRect(250, 140, 50, 36);
+  ctx.strokeStyle = '#0f0';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(250, 140, 50, 36);
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 26px monospace';
+  ctx.fillText('-', 275, 166);
+
+  // wave number box
+  ctx.fillStyle = '#022';
+  ctx.fillRect(310, 140, 80, 36);
+  ctx.strokeStyle = '#0ff';
+  ctx.strokeRect(310, 140, 80, 36);
+  ctx.fillStyle = '#0ff';
+  ctx.font = 'bold 26px monospace';
+  ctx.fillText(startWave, 350, 166);
+
+  // + button
+  ctx.fillStyle = '#0a0';
+  ctx.fillRect(400, 140, 50, 36);
+  ctx.strokeStyle = '#0f0';
+  ctx.strokeRect(400, 140, 50, 36);
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 26px monospace';
+  ctx.fillText('+', 425, 166);
+
+  // Peaceful toggle
+  ctx.fillStyle = peacefulMode ? '#0a0' : '#a00';
+  ctx.fillRect(W/2 - 110, 195, 220, 45);
+  ctx.strokeStyle = '#0f0';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(W/2 - 110, 195, 220, 45);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 18px monospace';
+  ctx.fillText(peacefulMode ? 'PEACEFUL MODE' : 'WAVE MODE', W/2, 225);
+
+  // Skin section
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 18px monospace';
+  ctx.fillText('SKIN SHAPE', W/2, 265);
+
+  const shapeLabels = ['SQUARE', 'TRIANGLE', 'PENTAGON', 'CIRCLE'];
+  const shapeStartX = 150;
+  SHAPES.forEach((s, i) => {
+    const bx = shapeStartX + i * 130;
+    const selected = playerShape === s;
+    ctx.fillStyle = selected ? '#0f0' : '#033';
+    ctx.fillRect(bx, 275, 110, 40);
+    ctx.strokeStyle = selected ? '#fff' : '#0a0';
+    ctx.lineWidth = selected ? 3 : 1;
+    ctx.strokeRect(bx, 275, 110, 40);
+    ctx.fillStyle = selected ? '#000' : '#0f0';
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText(shapeLabels[i], bx + 55, 301);
+  });
+
+  // Colors
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 18px monospace';
+  ctx.fillText('COLOR', W/2, 335);
+
+  COLORS.forEach((c, i) => {
+    const bx = 140 + i * 70;
+    const selected = playerColor === c;
+    ctx.fillStyle = c;
+    ctx.fillRect(bx, 345, 55, 40);
+    ctx.strokeStyle = selected ? '#fff' : '#444';
+    ctx.lineWidth = selected ? 3 : 1;
+    ctx.strokeRect(bx, 345, 55, 40);
+  });
+
+  // Preview of player
+  drawPlayer(W/2, 410, 18, playerColor, playerShape);
+
+  // START button
+  ctx.fillStyle = '#0a0';
+  ctx.fillRect(W/2 - 120, 440, 240, 48);
+  ctx.strokeStyle = '#0f0';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(W/2 - 120, 440, 240, 48);
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 26px monospace';
+  ctx.fillText('▶  START', W/2, 472);
+
+  ctx.textAlign = 'left';
+}
+
+function draw() {
+  if (gameState === 'menu') {
+    drawMenu();
+    return;
+  }
+
+  drawMatrix();
+
+  // Items
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 13px monospace';
+  items.forEach(it => {
+    ctx.fillText(it.value, it.x - 10, it.y);
+    ctx.strokeStyle = '#0f0';
+    ctx.strokeRect(it.x - 14, it.y - 14, 30, 20);
+  });
+
+  // Upgrade coins
+  upgrades.forEach(up => {
+    ctx.fillStyle = up.color;
+    ctx.beginPath();
+    ctx.arc(up.x, up.y, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(up.name.slice(0, 4), up.x, up.y + 3);
+  });
+  ctx.textAlign = 'left';
+
+  // Player
+  drawPlayer(player.x, player.y, player.size, sizeBoostActive ? '#0ff' : playerColor, playerShape);
+
+  // Forcefield visual
+  if (forceField) {
+    ctx.strokeStyle = 'rgba(0, 255, 255, 0.7)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.size + 18, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(0, 200, 255, 0.35)';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.size + 22, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Tiny blue spaceships
+  enemies.forEach(en => {
+    if (en.isSuperBoss) {
+      ctx.fillStyle = '#f0f';
+      ctx.fillRect(en.x - 28, en.y - 22, 56, 44);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(en.x - 12, en.y - 28, 24, 10);
+      const ratio = en.hp / en.maxHp;
+      ctx.fillStyle = '#500';
+      ctx.fillRect(en.x - 30, en.y - 38, 60, 6);
+      ctx.fillStyle = '#f0f';
+      ctx.fillRect(en.x - 30, en.y - 38, 60 * ratio, 6);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 12px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('SUPER', en.x, en.y + 4);
+
+      // Beam countdown + charge warning
+      if (en.charging) {
+        ctx.fillStyle = '#ff0';
+        ctx.font = 'bold 16px monospace';
+        ctx.fillText('CHARGING ' + Math.max(0, en.beamTimer).toFixed(1) + 's', en.x, en.y + 26);
+        // Pulsing warning circle
+        ctx.strokeStyle = 'rgba(255, 255, 0, ' + (0.4 + Math.sin(performance.now()/100) * 0.4) + ')';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.arc(en.x, en.y, 70, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (en.beamTimer > 0 && en.beamTimer < 8) {
+        ctx.fillStyle = '#aaa';
+        ctx.font = 'bold 11px monospace';
+        ctx.fillText('BEAM ' + en.beamTimer.toFixed(1) + 's', en.x, en.y + 22);
+      }
+
+      // Forcefield visual
+      if (en.forceActive) {
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(en.x, en.y, 48, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(0, 200, 255, 0.4)';
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.arc(en.x, en.y, 52, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    } else if (en.isBoss) {
+      ctx.fillStyle = '#f80';
+      ctx.fillRect(en.x - 18, en.y - 14, 36, 28);
+      ctx.fillStyle = '#ff0';
+      ctx.fillRect(en.x - 8, en.y - 18, 16, 8);
+      // HP bar
+      const ratio = en.hp / en.maxHp;
+      ctx.fillStyle = '#300';
+      ctx.fillRect(en.x - 20, en.y - 26, 40, 4);
+      ctx.fillStyle = '#f00';
+      ctx.fillRect(en.x - 20, en.y - 26, 40 * ratio, 4);
+    } else {
+      // Normal, elite (red), or yellow (post 25)
+      if (en.isYellow) {
+        ctx.fillStyle = '#ff0';
+        ctx.fillRect(en.x - 7, en.y - 5, 14, 10);
+        ctx.fillStyle = '#ffa';
+        ctx.fillRect(en.x - 3, en.y - 7, 6, 4);
+      } else if (en.isElite) {
+        ctx.fillStyle = '#f22';
+        ctx.fillRect(en.x - 7, en.y - 5, 14, 10);
+        ctx.fillStyle = '#f66';
+        ctx.fillRect(en.x - 3, en.y - 7, 6, 4);
+      } else {
+        ctx.fillStyle = '#08f';
+        ctx.fillRect(en.x - 7, en.y - 5, 14, 10);
+        ctx.fillStyle = '#0af';
+        ctx.fillRect(en.x - 3, en.y - 7, 6, 4);
+      }
+    }
+  });
+
+  // Enemy bullets
+  enemyBullets.forEach(b => {
+    if (b.isLightning) {
+      // Big bright lightning bolt
+      ctx.fillStyle = '#ffff00';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 36, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ffffaa';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 36, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = '#f44';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+
+  // Player gun bullets (green)
+  const bulletSize = sizeBoostActive ? 12 : 4;
+  ctx.fillStyle = sizeBoostActive ? '#0ff' : '#0f0';
+  playerBullets.forEach(b => {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, bulletSize, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Boss minions
+  ctx.fillStyle = '#fa0';
+  minions.forEach(m => {
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#f80';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  });
+
+  drawDragon();
+
+  // Score
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 36px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('SCORE: ' + score, W / 2, 40);
+  ctx.font = '14px monospace';
+  ctx.fillText('Speed: ' + player.speed.toFixed(1), W / 2, 65);
+  ctx.font = '14px monospace';
+  ctx.fillText('Wave: ' + waveNumber + '  Ships: ' + enemies.length, W / 2, 88);
+
+  if (stunned) {
+    ctx.fillStyle = '#ff0';
+    ctx.font = 'bold 28px monospace';
+    ctx.fillText('STUNNED!', W / 2, H / 2);
+  }
+
+  // Big charge warning
+  const chargingBoss = enemies.find(e => e.isSuperBoss && e.charging);
+  if (chargingBoss) {
+    ctx.fillStyle = 'rgba(255, 200, 0, 0.9)';
+    ctx.font = 'bold 32px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('⚠ BEAM CHARGING ⚠', W / 2, 160);
+    ctx.font = 'bold 20px monospace';
+    ctx.fillText(Math.max(0, chargingBoss.beamTimer).toFixed(1) + 's', W / 2, 190);
+    ctx.textAlign = 'left';
+  }
+
+  // Wave announcement
+  if (waveMessageTimer > 0) {
+    ctx.fillStyle = '#0ff';
+    ctx.font = 'bold 36px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(waveMessage, W / 2, H / 2 - 40);
+    ctx.textAlign = 'left';
+  }
+
+  // Home button (top left)
+  ctx.fillStyle = '#08a';
+  ctx.fillRect(homeBtn.x, homeBtn.y, homeBtn.w, homeBtn.h);
+  ctx.strokeStyle = '#0ff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(homeBtn.x, homeBtn.y, homeBtn.w, homeBtn.h);
+  ctx.fillStyle = '#0ff';
+  ctx.font = 'bold 16px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('HOME', homeBtn.x + homeBtn.w / 2, homeBtn.y + 21);
+  ctx.textAlign = 'left';
+
+  // Shop button (top right)
+  ctx.fillStyle = '#0f0';
+  ctx.strokeStyle = '#0f0';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(shopBtn.x, shopBtn.y, shopBtn.w, shopBtn.h);
+  ctx.font = 'bold 16px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('SHOP', shopBtn.x + shopBtn.w / 2, shopBtn.y + 21);
+  ctx.textAlign = 'left';
+
+  // Ability status
+  const now = performance.now() / 1000;
+  ctx.font = 'bold 14px monospace';
+
+  // T
+  if (!tUnlocked) {
+    ctx.fillStyle = '#666';
+    ctx.fillText('T locked', W / 2, 108);
+  } else {
+    const tRem = Math.max(0, TELEPORT_CD - (now - lastTeleport));
+    ctx.fillStyle = tRem > 0 ? '#f00' : '#0f0';
+    ctx.fillText(tRem > 0 ? 'T: ' + tRem.toFixed(1) + 's' : 'T ready!', W / 2, 108);
+  }
+
+  // R
+  if (!rUnlocked) {
+    ctx.fillStyle = '#666';
+    ctx.fillText('R locked', W / 2, 110);
+  } else {
+    const rRem = Math.max(0, SIZE_CD - (now - lastSizeBoost));
+    const sizeRem = Math.max(0, sizeBoostEnd - now);
+    if (sizeBoostActive) {
+      ctx.fillStyle = '#0ff';
+      ctx.fillText('R groot: ' + sizeRem.toFixed(1) + 's', W / 2, 128);
+    } else {
+      ctx.fillStyle = rRem > 0 ? '#f00' : '#0f0';
+      ctx.fillText(rRem > 0 ? 'R: ' + rRem.toFixed(1) + 's' : 'R ready!', W / 2, 128);
+    }
+  }
+
+  // Y
+  if (!yUnlocked) {
+    ctx.fillStyle = '#666';
+    ctx.fillText('Y locked', W / 2, 148);
+  } else {
+    const superProgress = Math.max(0, Math.min(score - scoreAtLastSuper, SUPER_COST));
+    if (dragonActive) {
+      ctx.fillStyle = '#0f0';
+      ctx.fillText('DRAAK!', W / 2, 130);
+    } else if (superProgress >= SUPER_COST) {
+      ctx.fillStyle = '#0f0';
+      ctx.fillText('Y SUPER READY!', W / 2, 148);
+    } else {
+      ctx.fillStyle = '#ff0';
+      ctx.fillText('Y: ' + superProgress + '/' + SUPER_COST, W / 2, 148);
+    }
+  }
+
+  // Q status
+  if (!qUnlocked) {
+    ctx.fillStyle = '#666';
+    ctx.fillText('Q locked', W / 2, 168);
+  } else {
+    const qRem = Math.max(0, DASH_CD - (now - lastDash));
+    if (dashActive) {
+      ctx.fillStyle = '#0ff';
+      ctx.fillText('Q DASHING!', W / 2, 168);
+    } else {
+      ctx.fillStyle = qRem > 0 && !opFun ? '#f00' : '#0f0';
+      ctx.fillText(qRem > 0 && !opFun ? 'Q: ' + qRem.toFixed(1) + 's' : 'Q ready!', W / 2, 168);
+    }
+  }
+
+  ctx.textAlign = 'left';
+
+  // Permanent powers in corner
+  if (permanentPowers.length > 0) {
+    ctx.fillStyle = '#0f0';
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('POWERS:', 15, H - 20 - permanentPowers.length * 18);
+    permanentPowers.forEach((p, i) => {
+      ctx.fillText('• ' + getPowerLabel(p), 15, H - 5 - (permanentPowers.length - 1 - i) * 18);
+    });
+  }
+
+  // Stamina bar - bottom right
+  const barW = 160;
+  const barH = 18;
+  const barX = W - barW - 15;
+  const barY = H - barH - 15;
+  const staminaRatio = stamina / MAX_STAMINA;
+
+  // Health bar - above stamina
+  const healthBarY = barY - barH - 8;
+  const healthRatio = health / (MAX_HEALTH + extraMaxHealth);
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.fillRect(barX - 2, healthBarY - 2, barW + 4, barH + 4);
+  ctx.strokeStyle = '#0f0';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(barX - 2, healthBarY - 2, barW + 4, barH + 4);
+
+  ctx.fillStyle = healthRatio > 0.4 ? '#0f0' : (healthRatio > 0.2 ? '#ff0' : '#f00');
+  ctx.fillRect(barX, healthBarY, barW * healthRatio, barH);
+
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 12px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('HP  ' + Math.round(health) + '%', barX + barW / 2, healthBarY + 13);
+
+  // Stamina bar
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.fillRect(barX - 2, barY - 2, barW + 4, barH + 4);
+  ctx.strokeStyle = '#0f0';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(barX - 2, barY - 2, barW + 4, barH + 4);
+
+  ctx.fillStyle = staminaRatio > 0.3 ? '#0f0' : (staminaRatio > 0.1 ? '#ff0' : '#f00');
+  ctx.fillRect(barX, barY, barW * staminaRatio, barH);
+
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText('BOOST  ' + Math.round(stamina) + '%', barX + barW / 2, barY + 13);
+  ctx.textAlign = 'left';
+
+  drawShop();
+
+  // Floating command bar (opened with /)
+  if (commandOpen) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, H - 60, W, 60);
+    ctx.fillStyle = '#0a0';
+    ctx.fillRect(W/2 - 220, H - 50, 440, 36);
+    ctx.strokeStyle = '#0f0';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(W/2 - 220, H - 50, 440, 36);
+    ctx.fillStyle = '#0f0';
+    ctx.font = '18px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('> ' + commandText + (Math.floor(Date.now()/500)%2 ? '_' : ''), W/2 - 200, H - 26);
+    if (commandMessage) {
+      ctx.fillStyle = '#ff0';
+      ctx.textAlign = 'center';
+      ctx.fillText(commandMessage, W/2, H - 70);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  // Game over screen + leaderboard
+  if (gameState === 'gameOver' || gameOver) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#f00';
+    ctx.font = 'bold 40px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('GAME OVER', W/2, 55);
+
+    ctx.fillStyle = '#0f0';
+    ctx.font = '18px monospace';
+    ctx.fillText((playerName || 'Anoniem') + '  —  Score: ' + score + '  Wave: ' + waveNumber, W/2, 90);
+
+    // Leaderboard
+    ctx.fillStyle = '#ff0';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText('LEADERBOARD', W/2, 125);
+
+    const lb = loadLeaderboard();
+    lb.slice(0, 7).forEach((entry, i) => {
+      const isYou = entry.name === playerName && entry.score === score;
+      ctx.fillStyle = isYou ? '#0f0' : (i === 0 ? '#ff0' : '#aaa');
+      ctx.font = (isYou ? 'bold ' : '') + '15px monospace';
+      ctx.fillText((i+1) + '. ' + (entry.name || '???').padEnd(12, ' ') + '  ' + entry.score + '  (W' + (entry.wave||0) + ')', W/2, 150 + i * 24);
+    });
+
+    // RESPAWN button
+    ctx.fillStyle = '#0a0';
+    ctx.fillRect(W/2 - 100, H - 110, 200, 40);
+    ctx.strokeStyle = '#0f0';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(W/2 - 100, H - 110, 200, 40);
+    ctx.fillStyle = '#0f0';
+    ctx.font = 'bold 20px monospace';
+    ctx.fillText('RESPAWN', W/2, H - 82);
+
+    // HOME button
+    ctx.fillStyle = '#08a';
+    ctx.fillRect(W/2 - 100, H - 60, 200, 40);
+    ctx.strokeStyle = '#0ff';
+    ctx.strokeRect(W/2 - 100, H - 60, 200, 40);
+    ctx.fillStyle = '#0ff';
+    ctx.font = 'bold 20px monospace';
+    ctx.fillText('HOME', W/2, H - 32);
+
+    ctx.textAlign = 'left';
+  }
+}
+
+function loop(now) {
+  const delta = (now - lastTime) / 1000;
+  lastTime = now;
+  update(delta);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

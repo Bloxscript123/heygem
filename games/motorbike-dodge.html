@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<title>Motor Bike Dodge</title>
+<style>
+  body {
+    margin: 0;
+    background: #111;
+    color: #fff;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    overflow: hidden;
+  }
+  canvas {
+    border: 3px solid #333;
+    background: #1a1a1a;
+    border-radius: 8px;
+    box-shadow: 0 0 30px rgba(0,0,0,0.6);
+  }
+  #info {
+    margin-top: 12px;
+    text-align: center;
+    font-size: 14px;
+    color: #aaa;
+  }
+  #info b { color: #0f0; }
+  .back-home {
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    background: rgba(0,0,0,0.75);
+    color: #0f0;
+    border: 1px solid #0f0;
+    padding: 8px 14px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 600;
+    z-index: 100;
+    transition: background 0.2s;
+    cursor: pointer;
+    font-family: 'Segoe UI', Arial, sans-serif;
+  }
+  .back-home:hover {
+    background: rgba(0,255,0,0.18);
+  }
+</style>
+</head>
+<body>
+<a class="back-home" id="navBtn" href="../index.html">< home</a>
+<canvas id="game" width="900" height="500"></canvas>
+<div id="info">
+  <b>W/S</b> = lane omhoog/omlaag &nbsp;•&nbsp; <b>A/D</b> = achteruit / vooruit &nbsp;•&nbsp; <b>Space</b> = springen &nbsp;•&nbsp; Power-ups: Shield, Turbo, Slow-mo, 2x Score
+</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width;
+const H = canvas.height;
+
+// Website homepage (jouw Downloads)
+const WEBSITE_HOME='../index.html';
+
+// Safe storage (no crash in sandboxed pages without localStorage)
+const _mem = {};
+function storageGet(key) {
+  try { return window.localStorage.getItem(key); } catch (e) { return _mem[key] != null ? _mem[key] : null; }
+}
+function storageSet(key, val) {
+  try { window.localStorage.setItem(key, val); } catch (e) { _mem[key] = String(val); }
+}
+
+// Road settings
+const ROAD_TOP = 80;
+const ROAD_BOTTOM = H - 60;
+const ROAD_HEIGHT = ROAD_BOTTOM - ROAD_TOP;
+const LANES = 3;
+const LANE_HEIGHT = ROAD_HEIGHT / LANES;
+
+// Player (motorcycle)
+let player = {
+  lane: 1,          // 0, 1, 2
+  x: 140,
+  y: 0,
+  width: 70,
+  height: 36,
+  jumping: false,
+  jumpY: 0,
+  jumpSpeed: 0,
+  moveSpeed: 5.5
+};
+const PLAYER_MIN_X = 60;
+const PLAYER_MAX_X = 380;
+
+// Game state
+let gameState = 'menu'; // menu | playing | gameOver
+let score = 0;
+let playerName = storageGet('heygemm_player_name') || '';
+let nameInput = playerName;
+let nameFocused = false;
+let distance = 0;
+let speed = 6;
+let maxSpeed = 16;
+let frame = 0;
+let obstacles = [];
+let particles = [];
+let powerups = [];
+let roadOffset = 0;
+
+// Skin & difficulty
+const SKINS = [
+  { id: 'red',    color: '#e74c3c', name: 'Rood' },
+  { id: 'blue',   color: '#3498db', name: 'Blauw' },
+  { id: 'green',  color: '#2ecc71', name: 'Groen' },
+  { id: 'yellow', color: '#f1c40f', name: 'Geel' },
+  { id: 'purple', color: '#9b59b6', name: 'Paars' },
+  { id: 'orange', color: '#e67e22', name: 'Oranje' },
+  { id: 'cyan',   color: '#1abc9c', name: 'Cyaan' },
+  { id: 'white',  color: '#ecf0f1', name: 'Wit' }
+];
+let selectedSkin = parseInt(storageGet('heygemm_motorbike_skin') || '0', 10);
+if (selectedSkin < 0 || selectedSkin >= SKINS.length) selectedSkin = 0;
+
+const DIFFS = {
+  easy:   { label: 'EASY',   startSpeed: 4.5, maxSpeed: 11, spawnBase: 55, speedUp: 0.22, scoreMul: 0.7 },
+  medium: { label: 'MEDIUM', startSpeed: 6,   maxSpeed: 16, spawnBase: 40, speedUp: 0.35, scoreMul: 1.0 },
+  hard:   { label: 'HARD',   startSpeed: 8,   maxSpeed: 20, spawnBase: 28, speedUp: 0.50, scoreMul: 1.5 }
+};
+let difficulty = storageGet('heygemm_motorbike_diff') || 'medium';
+if (!DIFFS[difficulty]) difficulty = 'medium';
+
+// Leaderboard
+const LB_KEY = 'heygemm_motorbike_leaderboard';
+function loadLeaderboard() {
+  try {
+    return JSON.parse(storageGet(LB_KEY) || '[]');
+  } catch { return []; }
+}
+function saveToLeaderboard(name, sc, diff) {
+  name = (name || 'Anoniem').trim();
+  let lb = loadLeaderboard();
+  const prev = lb.find(e => (e.name || '').toLowerCase() === name.toLowerCase());
+  const best = Math.floor(sc);
+  if (prev && best <= (prev.score || 0)) return lb;
+  lb = lb.filter(e => (e.name || '').toLowerCase() !== name.toLowerCase());
+  lb.push({ name: name, score: best, diff: diff || 'medium', date: Date.now() });
+  lb.sort((a, b) => b.score - a.score);
+  lb = lb.slice(0, 10);
+  storageSet(LB_KEY, JSON.stringify(lb));
+  return lb;
+}
+let leaderboard = loadLeaderboard();
+let highScore = leaderboard.length ? leaderboard[0].score : 0;
+
+// Active power-ups (duration 7.5s)
+const POWERUP_DURATION = 7.5;
+let activePowers = {
+  shield: 0,      // invincible
+  turbo: 0,       // extra speed
+  slowmo: 0,      // slower obstacles
+  magnet: 0       // bigger score
+};
+
+// Input
+const keys = {};
+window.addEventListener('keydown', e => {
+  // Menu name input
+  if (gameState === 'menu' && nameFocused) {
+    if (e.key === 'Enter') { nameFocused = false; e.preventDefault(); return; }
+    if (e.key === 'Backspace') { nameInput = nameInput.slice(0, -1); e.preventDefault(); return; }
+    if (e.key === 'Escape') { nameFocused = false; e.preventDefault(); return; }
+    if (e.key.length === 1 && nameInput.length < 12 && !e.ctrlKey && !e.metaKey) {
+      nameInput += e.key; e.preventDefault(); return;
+    }
+    return;
+  }
+
+  if (gameState === 'menu') {
+    if (e.key === 'Enter' || e.key === ' ') { startGame(); e.preventDefault(); return; }
+    return;
+  }
+
+  keys[e.key.toLowerCase()] = true;
+  if (['arrowup','arrowdown','arrowleft','arrowright','w','a','s','d',' '].includes(e.key.toLowerCase())) e.preventDefault();
+
+  if (gameState === 'gameOver' && (e.key === ' ' || e.key === 'Enter' || e.key === 'r' || e.key === 'h')) {
+    goToMenu();
+  }
+});
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+canvas.addEventListener('click', (ev) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const mx = (ev.clientX - rect.left) * scaleX;
+  const my = (ev.clientY - rect.top) * scaleY;
+
+  if (gameState === 'menu') {
+    handleMenuClick(mx, my);
+    return;
+  }
+  if (gameState === 'gameOver') {
+    goToMenu();
+  }
+});
+
+function handleMenuClick(mx, my) {
+  // Name field
+  if (mx >= W/2 - 150 && mx <= W/2 + 150 && my >= 118 && my <= 152) {
+    nameFocused = true;
+    return;
+  }
+  nameFocused = false;
+
+  // Skin buttons (row)
+  const skinY = 195;
+  const skinW = 52;
+  const skinStart = W/2 - (SKINS.length * (skinW + 8)) / 2;
+  SKINS.forEach((_, i) => {
+    const x = skinStart + i * (skinW + 8);
+    if (mx >= x && mx <= x + skinW && my >= skinY && my <= skinY + 36) {
+      selectedSkin = i;
+      storageSet('heygemm_motorbike_skin', i);
+    }
+  });
+
+  // Difficulty buttons
+  const diffs = ['easy', 'medium', 'hard'];
+  const diffY = 280;
+  diffs.forEach((d, i) => {
+    const x = W/2 - 160 + i * 115;
+    if (mx >= x && mx <= x + 100 && my >= diffY && my <= diffY + 40) {
+      difficulty = d;
+      storageSet('heygemm_motorbike_diff', d);
+    }
+  });
+
+  // Start button
+  if (mx >= W/2 - 110 && mx <= W/2 + 110 && my >= 345 && my <= 393) {
+    startGame();
+    return;
+  }
+  // Website button
+  if (mx >= W/2 - 110 && mx <= W/2 + 110 && my >= 405 && my <= 445) {
+    goToWebsite();
+  }
+}
+
+function goToMenu() {
+  gameState = 'menu';
+  nameFocused = false;
+  obstacles = [];
+  particles = [];
+  powerups = [];
+  activePowers = { shield: 0, turbo: 0, slowmo: 0, magnet: 0 };
+  updateNavBtn();
+}
+
+function goToWebsite() {
+  window.location.href = WEBSITE_HOME;
+}
+
+function updateNavBtn() {
+  const btn = document.getElementById('navBtn');
+  if (!btn) return;
+  btn.textContent = '< home';
+  btn.onclick = (e) => { e.preventDefault(); goToWebsite(); };
+}
+updateNavBtn();
+
+document.getElementById('navBtn').addEventListener('click', (e) => {
+  e.preventDefault();
+  goToWebsite();
+});
+
+function startGame() {
+  playerName = (nameInput.trim() || 'Anoniem').slice(0, 12);
+  storageSet('heygemm_player_name', playerName);
+  const d = DIFFS[difficulty];
+  player.lane = 1;
+  player.x = 140;
+  player.jumping = false;
+  player.jumpY = 0;
+  player.jumpSpeed = 0;
+  score = 0;
+  distance = 0;
+  speed = d.startSpeed;
+  maxSpeed = d.maxSpeed;
+  frame = 0;
+  obstacles = [];
+  particles = [];
+  powerups = [];
+  roadOffset = 0;
+  activePowers = { shield: 0, turbo: 0, slowmo: 0, magnet: 0 };
+  gameState = 'playing';
+  updateNavBtn();
+}
+
+function getLaneY(lane) {
+  return ROAD_TOP + lane * LANE_HEIGHT + LANE_HEIGHT / 2;
+}
+
+function spawnObstacle() {
+  const lane = Math.floor(Math.random() * LANES);
+  const types = ['car', 'barrier', 'rock', 'truck'];
+  const type = types[Math.floor(Math.random() * types.length)];
+
+  let w, h, color;
+  if (type === 'car') {
+    w = 55; h = 28; color = ['#e74c3c', '#3498db', '#f1c40f', '#9b59b6'][Math.floor(Math.random()*4)];
+  } else if (type === 'truck') {
+    w = 90; h = 38; color = '#2c3e50';
+  } else if (type === 'barrier') {
+    w = 40; h = 32; color = '#e67e22';
+  } else {
+    w = 30; h = 24; color = '#7f8c8d';
+  }
+
+  obstacles.push({
+    x: W + 50,
+    lane,
+    w, h,
+    type,
+    color,
+    passed: false
+  });
+}
+
+function spawnPowerup() {
+  const lane = Math.floor(Math.random() * LANES);
+  const types = [
+    { id: 'shield', label: 'SHIELD', color: '#0ff' },
+    { id: 'turbo',  label: 'TURBO',  color: '#f80' },
+    { id: 'slowmo', label: 'SLOW',   color: '#a0f' },
+    { id: 'magnet', label: '2x',     color: '#ff0' }
+  ];
+  const t = types[Math.floor(Math.random() * types.length)];
+  powerups.push({
+    x: W + 40,
+    lane,
+    type: t.id,
+    label: t.label,
+    color: t.color,
+    bob: Math.random() * Math.PI * 2
+  });
+}
+
+function update(dt) {
+  if (gameState !== 'playing') return;
+
+  frame++;
+
+  // Active power timers
+  for (const k of Object.keys(activePowers)) {
+    if (activePowers[k] > 0) {
+      activePowers[k] -= dt;
+      if (activePowers[k] < 0) activePowers[k] = 0;
+    }
+  }
+
+  // Effective speed
+  let currentSpeed = speed;
+  if (activePowers.turbo > 0) currentSpeed *= 1.55;
+  if (activePowers.slowmo > 0) currentSpeed *= 0.55;
+
+  const diffCfg = DIFFS[difficulty] || DIFFS.medium;
+  distance += currentSpeed * 0.15;
+  let scoreGain = currentSpeed * 0.15 * diffCfg.scoreMul;
+  if (activePowers.magnet > 0) scoreGain *= 2;
+  score += scoreGain;
+
+  // Gradually increase base speed
+  if (speed < maxSpeed && frame % 180 === 0) {
+    speed += diffCfg.speedUp;
+  }
+
+  // Road scroll
+  roadOffset = (roadOffset + currentSpeed) % 80;
+
+  // Lane change (W / S or Arrow Up / Down)
+  if ((keys['arrowup'] || keys['w']) && !player.jumping) {
+    if (player.lane > 0) {
+      player.lane--;
+      keys['arrowup'] = keys['w'] = false;
+    }
+  }
+  if ((keys['arrowdown'] || keys['s']) && !player.jumping) {
+    if (player.lane < LANES - 1) {
+      player.lane++;
+      keys['arrowdown'] = keys['s'] = false;
+    }
+  }
+
+  // Forward / Backward (A = back, D = forward)
+  if (keys['a'] || keys['arrowleft']) {
+    player.x -= player.moveSpeed;
+  }
+  if (keys['d'] || keys['arrowright']) {
+    player.x += player.moveSpeed;
+  }
+  // Clamp position
+  if (player.x < PLAYER_MIN_X) player.x = PLAYER_MIN_X;
+  if (player.x > PLAYER_MAX_X) player.x = PLAYER_MAX_X;
+
+  // Jump
+  if ((keys[' '] || keys['space']) && !player.jumping) {
+    player.jumping = true;
+    player.jumpSpeed = -11;
+    keys[' '] = keys['space'] = false;
+  }
+
+  if (player.jumping) {
+    player.jumpSpeed += 0.55;
+    player.jumpY += player.jumpSpeed;
+    if (player.jumpY >= 0) {
+      player.jumpY = 0;
+      player.jumping = false;
+      player.jumpSpeed = 0;
+    }
+  }
+
+  // Target y based on lane
+  const targetY = getLaneY(player.lane);
+  player.y += (targetY - player.y) * 0.22;
+
+  // Spawn obstacles
+  const spawnEvery = Math.max(20, (DIFFS[difficulty] || DIFFS.medium).spawnBase - Math.floor(speed * 1.5));
+  if (frame % spawnEvery === 0) {
+    spawnObstacle();
+  }
+
+  // Spawn power-ups occasionally
+  if (frame % 220 === 0) {
+    spawnPowerup();
+  }
+
+  // Move obstacles
+  const obsSpeed = currentSpeed * 1.4;
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    const o = obstacles[i];
+    o.x -= obsSpeed;
+
+    // Score when passed
+    if (!o.passed && o.x + o.w < player.x) {
+      o.passed = true;
+      score += activePowers.magnet > 0 ? 20 : 10;
+    }
+
+    // Collision
+    if (!o.passed && activePowers.shield <= 0) {
+      const px = player.x;
+      const py = player.y + player.jumpY;
+      const pw = player.width * 0.7;
+      const ph = player.height * 0.6;
+
+      const ox = o.x;
+      const oy = getLaneY(o.lane);
+      const ow = o.w;
+      const oh = o.h;
+
+      if (Math.abs(px - ox) < (pw + ow) / 2 &&
+          Math.abs(py - oy) < (ph + oh) / 2 &&
+          player.jumpY > -25) {
+        gameState = 'gameOver';
+        leaderboard = saveToLeaderboard(playerName, score, difficulty);
+        highScore = leaderboard.length ? leaderboard[0].score : 0;
+        highScore = leaderboard.length ? leaderboard[0].score : 0;
+        for (let p = 0; p < 18; p++) {
+          particles.push({
+            x: player.x,
+            y: player.y + player.jumpY,
+            vx: (Math.random() - 0.5) * 12,
+            vy: (Math.random() - 0.5) * 12,
+            life: 40 + Math.random() * 20,
+            color: ['#f00', '#ff0', '#fa0', '#fff'][Math.floor(Math.random()*4)]
+          });
+        }
+      }
+    }
+
+    if (o.x + o.w < -50) {
+      obstacles.splice(i, 1);
+    }
+  }
+
+  // Move & collect power-ups
+  for (let i = powerups.length - 1; i >= 0; i--) {
+    const p = powerups[i];
+    p.x -= obsSpeed;
+    p.bob += dt * 4;
+
+    const py = getLaneY(p.lane) + Math.sin(p.bob) * 6;
+    if (Math.abs(player.x - p.x) < 40 &&
+        Math.abs((player.y + player.jumpY) - py) < 35) {
+      // Activate power-up for 7.5 seconds
+      activePowers[p.type] = POWERUP_DURATION;
+      // small particles
+      for (let k = 0; k < 10; k++) {
+        particles.push({
+          x: p.x, y: py,
+          vx: (Math.random() - 0.5) * 8,
+          vy: (Math.random() - 0.5) * 8,
+          life: 25,
+          color: p.color
+        });
+      }
+      powerups.splice(i, 1);
+      continue;
+    }
+
+    if (p.x < -40) powerups.splice(i, 1);
+  }
+
+  // Update particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.3;
+    p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawRoad() {
+  // Grass / side
+  ctx.fillStyle = '#1e3a1e';
+  ctx.fillRect(0, 0, W, ROAD_TOP);
+  ctx.fillStyle = '#163016';
+  ctx.fillRect(0, ROAD_BOTTOM, W, H - ROAD_BOTTOM);
+
+  // Road surface
+  ctx.fillStyle = '#2c2c2c';
+  ctx.fillRect(0, ROAD_TOP, W, ROAD_HEIGHT);
+
+  // Lane lines
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([20, 25]);
+  for (let i = 1; i < LANES; i++) {
+    const y = ROAD_TOP + i * LANE_HEIGHT;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Center dashed line effect (moving)
+  ctx.strokeStyle = '#ff0';
+  ctx.lineWidth = 4;
+  ctx.setLineDash([40, 40]);
+  ctx.lineDashOffset = -roadOffset;
+  const midY = ROAD_TOP + ROAD_HEIGHT / 2;
+  // only draw subtle moving dashes on the outer edges of road
+  ctx.beginPath();
+  ctx.moveTo(0, ROAD_TOP + 6);
+  ctx.lineTo(W, ROAD_TOP + 6);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, ROAD_BOTTOM - 6);
+  ctx.lineTo(W, ROAD_BOTTOM - 6);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.lineDashOffset = 0;
+
+  // Edge lines
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(0, ROAD_TOP);
+  ctx.lineTo(W, ROAD_TOP);
+  ctx.moveTo(0, ROAD_BOTTOM);
+  ctx.lineTo(W, ROAD_BOTTOM);
+  ctx.stroke();
+}
+
+function drawMotorcycle(x, y) {
+  const jumping = player.jumping;
+  const scale = 1;
+
+  ctx.save();
+  ctx.translate(x, y + player.jumpY);
+
+  // Shadow
+  if (!jumping) {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(0, 18, 32, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Body (skin color)
+  ctx.fillStyle = SKINS[selectedSkin].color;
+  ctx.beginPath();
+  ctx.moveTo(-28, 0);
+  ctx.lineTo(25, -6);
+  ctx.lineTo(32, 4);
+  ctx.lineTo(20, 12);
+  ctx.lineTo(-22, 10);
+  ctx.closePath();
+  ctx.fill();
+
+  // Seat
+  ctx.fillStyle = '#222';
+  ctx.fillRect(-12, -8, 22, 8);
+
+  // Handlebar
+  ctx.strokeStyle = '#ddd';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(18, -4);
+  ctx.lineTo(28, -16);
+  ctx.lineTo(34, -14);
+  ctx.stroke();
+
+  // Front wheel
+  ctx.fillStyle = '#111';
+  ctx.beginPath();
+  ctx.arc(22, 10, 12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // rim
+  ctx.beginPath();
+  ctx.arc(22, 10, 5, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Back wheel
+  ctx.fillStyle = '#111';
+  ctx.beginPath();
+  ctx.arc(-18, 10, 13, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(-18, 10, 5, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Exhaust glow
+  if (frame % 6 < 3) {
+    ctx.fillStyle = '#f80';
+    ctx.beginPath();
+    ctx.arc(-30, 6, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function drawObstacle(o) {
+  const y = getLaneY(o.lane);
+
+  ctx.save();
+  ctx.translate(o.x, y);
+
+  if (o.type === 'car') {
+    // Car body
+    ctx.fillStyle = o.color;
+    ctx.fillRect(-o.w/2, -o.h/2, o.w, o.h);
+    // Windows
+    ctx.fillStyle = '#87ceeb';
+    ctx.fillRect(-o.w/2 + 8, -o.h/2 + 4, o.w - 20, o.h/2 - 2);
+    // Wheels
+    ctx.fillStyle = '#111';
+    ctx.beginPath();
+    ctx.arc(-o.w/2 + 12, o.h/2, 6, 0, Math.PI*2);
+    ctx.arc(o.w/2 - 12, o.h/2, 6, 0, Math.PI*2);
+    ctx.fill();
+  } else if (o.type === 'truck') {
+    ctx.fillStyle = o.color;
+    ctx.fillRect(-o.w/2, -o.h/2, o.w * 0.7, o.h);
+    ctx.fillStyle = '#34495e';
+    ctx.fillRect(-o.w/2 + o.w*0.65, -o.h/2 + 4, o.w*0.35, o.h - 8);
+    ctx.fillStyle = '#111';
+    ctx.beginPath();
+    ctx.arc(-o.w/2 + 15, o.h/2, 7, 0, Math.PI*2);
+    ctx.arc(o.w/2 - 15, o.h/2, 7, 0, Math.PI*2);
+    ctx.fill();
+  } else if (o.type === 'barrier') {
+    ctx.fillStyle = o.color;
+    ctx.fillRect(-o.w/2, -o.h/2, o.w, o.h);
+    // Stripes
+    ctx.fillStyle = '#fff';
+    for (let i = 0; i < 3; i++) {
+      ctx.fillRect(-o.w/2 + 6 + i*12, -o.h/2, 6, o.h);
+    }
+  } else { // rock
+    ctx.fillStyle = o.color;
+    ctx.beginPath();
+    ctx.moveTo(-o.w/2, o.h/2);
+    ctx.lineTo(-o.w/3, -o.h/2);
+    ctx.lineTo(o.w/4, -o.h/3);
+    ctx.lineTo(o.w/2, o.h/2);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function draw() {
+  // Background sky
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#0a1628');
+  grad.addColorStop(0.5, '#132d4a');
+  grad.addColorStop(1, '#1a1a1a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Simple stars / city lights
+  ctx.fillStyle = 'rgba(255,255,200,0.4)';
+  for (let i = 0; i < 30; i++) {
+    const sx = (i * 137 + frame * 0.3) % W;
+    const sy = 20 + (i * 47) % (ROAD_TOP - 30);
+    ctx.beginPath();
+    ctx.arc(sx, sy, 1.2, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  drawRoad();
+
+  // Obstacles
+  obstacles.forEach(drawObstacle);
+
+  // Power-ups
+  powerups.forEach(p => {
+    const y = getLaneY(p.lane) + Math.sin(p.bob) * 6;
+    // glow
+    ctx.fillStyle = p.color + '55';
+    ctx.beginPath();
+    ctx.arc(p.x, y, 22, 0, Math.PI * 2);
+    ctx.fill();
+    // circle
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, y, 16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // label
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 11px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.fillText(p.label, p.x, y + 4);
+  });
+
+  // Player
+  drawMotorcycle(player.x, player.y);
+
+  // Shield visual around bike
+  if (activePowers.shield > 0) {
+    ctx.strokeStyle = 'rgba(0, 255, 255, 0.7)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y + player.jumpY, 38, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(0, 200, 255, 0.3)';
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y + player.jumpY, 42, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Particles
+  particles.forEach(p => {
+    ctx.globalAlpha = Math.min(1, p.life / 30);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 3, 0, Math.PI*2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+
+  // ===== HUD =====
+  // Score
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 28px Segoe UI';
+  ctx.textAlign = 'left';
+  ctx.fillText('SCORE  ' + Math.floor(score), 20, 40);
+
+  // High score
+  ctx.fillStyle = '#ff0';
+  ctx.font = 'bold 18px Segoe UI';
+  ctx.fillText('BEST  ' + highScore, 20, 68);
+
+  // Speed display
+  let displaySpeed = speed;
+  if (activePowers.turbo > 0) displaySpeed *= 1.55;
+  if (activePowers.slowmo > 0) displaySpeed *= 0.55;
+
+  ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 20px Segoe UI';
+  ctx.fillText('SPEED  ' + displaySpeed.toFixed(1), 20, 95);
+
+  // Active power-ups on the right
+  const powerLabels = {
+    shield: { text: 'SHIELD', color: '#0ff' },
+    turbo:  { text: 'TURBO',  color: '#f80' },
+    slowmo: { text: 'SLOW-MO', color: '#a0f' },
+    magnet: { text: '2x SCORE', color: '#ff0' }
+  };
+
+  let py = 36;
+  for (const [key, val] of Object.entries(activePowers)) {
+    if (val > 0) {
+      const info = powerLabels[key];
+      // background bar
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(W - 170, py - 18, 150, 28);
+      // colored bar showing remaining time
+      const ratio = val / POWERUP_DURATION;
+      ctx.fillStyle = info.color;
+      ctx.fillRect(W - 170, py - 18, 150 * ratio, 28);
+      // text
+      ctx.fillStyle = '#000';
+      ctx.font = 'bold 14px Segoe UI';
+      ctx.textAlign = 'center';
+      ctx.fillText(info.text + '  ' + val.toFixed(1) + 's', W - 95, py + 2);
+      py += 34;
+    }
+  }
+  ctx.textAlign = 'left';
+
+  // ===== MENU (HOME) =====
+  if (gameState === 'menu') {
+    ctx.fillStyle = 'rgba(0,0,0,0.88)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = SKINS[selectedSkin].color;
+    ctx.font = 'bold 40px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.fillText('MOTOR BIKE DODGE', W/2, 55);
+
+    // Name
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px Segoe UI';
+    ctx.fillText('JOUW NAAM', W/2, 95);
+    ctx.fillStyle = nameFocused ? '#111' : '#1a1a1a';
+    ctx.fillRect(W/2 - 150, 105, 300, 40);
+    ctx.strokeStyle = nameFocused ? '#0ff' : '#0f0';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(W/2 - 150, 105, 300, 40);
+    ctx.fillStyle = '#0f0';
+    ctx.font = '20px Segoe UI';
+    const nd = (nameInput || '') + (nameFocused && Math.floor(Date.now()/500)%2 ? '|' : '');
+    ctx.fillText(nd || 'Klik om naam in te vullen', W/2, 132);
+
+    // Skin
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px Segoe UI';
+    ctx.fillText('MOTOR SKIN', W/2, 175);
+    const skinW = 52;
+    const skinStart = W/2 - (SKINS.length * (skinW + 8)) / 2;
+    SKINS.forEach((s, i) => {
+      const x = skinStart + i * (skinW + 8);
+      ctx.fillStyle = s.color;
+      ctx.fillRect(x, 185, skinW, 36);
+      if (i === selectedSkin) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x - 1, 184, skinW + 2, 38);
+      }
+    });
+    ctx.fillStyle = '#fff';
+    ctx.font = '13px Segoe UI';
+    ctx.fillText(SKINS[selectedSkin].name, W/2, 245);
+
+    // Difficulty
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px Segoe UI';
+    ctx.fillText('DIFFICULTY', W/2, 270);
+    const diffs = ['easy', 'medium', 'hard'];
+    const diffColors = { easy: '#2ecc71', medium: '#f1c40f', hard: '#e74c3c' };
+    diffs.forEach((d, i) => {
+      const x = W/2 - 160 + i * 115;
+      const selected = difficulty === d;
+      ctx.fillStyle = selected ? diffColors[d] : '#222';
+      ctx.fillRect(x, 280, 100, 40);
+      ctx.strokeStyle = diffColors[d];
+      ctx.lineWidth = selected ? 3 : 1;
+      ctx.strokeRect(x, 280, 100, 40);
+      ctx.fillStyle = selected ? '#000' : diffColors[d];
+      ctx.font = 'bold 16px Segoe UI';
+      ctx.fillText(DIFFS[d].label, x + 50, 306);
+    });
+
+    // Start button
+    ctx.fillStyle = '#0a0';
+    ctx.fillRect(W/2 - 110, 345, 220, 48);
+    ctx.strokeStyle = '#0f0';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(W/2 - 110, 345, 220, 48);
+    ctx.fillStyle = '#0f0';
+    ctx.font = 'bold 24px Segoe UI';
+    ctx.fillText('▶  START', W/2, 377);
+
+    // Website button
+    ctx.fillStyle = '#08a';
+    ctx.fillRect(W/2 - 110, 405, 220, 40);
+    ctx.strokeStyle = '#0ff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(W/2 - 110, 405, 220, 40);
+    ctx.fillStyle = '#0ff';
+    ctx.font = 'bold 16px Segoe UI';
+    ctx.fillText('< home', W/2, 431);
+
+    // Mini leaderboard
+    const lb = loadLeaderboard();
+    if (lb.length > 0) {
+      ctx.fillStyle = '#ff0';
+      ctx.font = 'bold 14px Segoe UI';
+      ctx.fillText('TOP 5', W/2, 440);
+      lb.slice(0, 5).forEach((entry, i) => {
+        ctx.fillStyle = i === 0 ? '#ff0' : '#999';
+        ctx.font = '13px Segoe UI';
+        const dlabel = entry.diff ? ' [' + entry.diff.toUpperCase() + ']' : '';
+        ctx.fillText((i+1) + '. ' + entry.name + '  ' + entry.score + dlabel, W/2, 460 + i * 18);
+      });
+    }
+    return;
+  }
+
+  // ===== GAME OVER → terug naar menu =====
+  if (gameState === 'gameOver') {
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#e74c3c';
+    ctx.font = 'bold 48px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.fillText('CRASHED!', W/2, 100);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '22px Segoe UI';
+    ctx.fillText(playerName + '  —  Score: ' + Math.floor(score), W/2, 150);
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px Segoe UI';
+    ctx.fillText('Difficulty: ' + (DIFFS[difficulty] || DIFFS.medium).label, W/2, 180);
+
+    ctx.fillStyle = '#ff0';
+    ctx.font = 'bold 18px Segoe UI';
+    ctx.fillText('LEADERBOARD', W/2, 230);
+
+    const lb2 = loadLeaderboard();
+    lb2.slice(0, 6).forEach((entry, i) => {
+      const isYou = entry.name === playerName && entry.score === Math.floor(score);
+      ctx.fillStyle = isYou ? '#0f0' : (i === 0 ? '#ff0' : '#ccc');
+      ctx.font = (isYou ? 'bold ' : '') + '15px Segoe UI';
+      const dlabel = entry.diff ? ' [' + entry.diff.toUpperCase() + ']' : '';
+      ctx.fillText((i+1) + '.  ' + entry.name + '  ' + entry.score + dlabel, W/2, 260 + i * 24);
+    });
+
+    ctx.fillStyle = '#0f0';
+    ctx.font = 'bold 18px Segoe UI';
+    ctx.fillText('Klik / SPACE / R  →  terug naar HOME', W/2, H - 40);
+  }
+}
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
