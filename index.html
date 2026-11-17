@@ -597,6 +597,19 @@
         </div>
       </article>
 
+      <article class="card">
+        <div class="card-preview" style="background:linear-gradient(145deg,#0a1a0a,#1a3a1a)">
+          <div style="font-size:3rem">⛏️</div>
+        </div>
+        <div class="card-body">
+          <div class="card-tag" style="color:#6c6">Sandbox</div>
+          <h2>Block Quest</h2>
+          <p>2D Minecraft-stijl: mine, plaats, craft tools, activeer de portal en versla de Ender Dragon.</p>
+          <div class="controls"><strong>Besturing:</strong> WASD · Spatie · muis mine/plaats · E craft · F portal/aanval</div>
+          <a class="btn btn-primary" style="background:#3a7a3a;color:#fff" href="games/block-quest.html">▶ Speel nu</a>
+        </div>
+      </article>
+
     </section>
 
     <h2 class="section-title" id="leaderboards">Leaderboards</h2>
@@ -663,6 +676,10 @@
         <h3 style="color:#b8f">🛸 Neon Drift 3D</h3>
         <ul class="lb-list" id="lb-neondrift"><li class="lb-empty">Nog geen scores</li></ul>
       </div>
+      <div class="lb-card" style="border-color:#1a3a1a">
+        <h3 style="color:#6c6">⛏️ Block Quest</h3>
+        <ul class="lb-list" id="lb-blockquest"><li class="lb-empty">Nog geen scores</li></ul>
+      </div>
     </section>
 
     <section id="about" style="padding-bottom: 60px; text-align: center;">
@@ -720,6 +737,8 @@
       renderLB('lb-stack', await loadLB('heygemm_stack_leaderboard'));
       renderLB('lb-bubble', await loadLB('heygemm_bubble_leaderboard'));
       renderLB('lb-idle', await loadLB('heygemm_idle_leaderboard'));
+      renderLB('lb-neondrift', await loadLB('heygemm_neondrift_leaderboard'), e => e.diff ? ' <small style="opacity:0.6">['+e.diff+']</small>' : '');
+      renderLB('lb-blockquest', await loadLB('heygemm_blockquest_leaderboard'), e => e.diff ? ' <small style="opacity:0.6">['+e.diff+']</small>' : '');
     })();
   </script>
 </body>
