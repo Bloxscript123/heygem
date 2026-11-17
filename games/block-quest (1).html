@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Block Quest – heygemm</title>
+<style>
+*{margin:0;box-sizing:border-box}
+body{background:#0a0c10;color:#e8ecf4;font-family:Segoe UI,system-ui,sans-serif;overflow:hidden;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}
+canvas{image-rendering:pixelated;border:2px solid #1e2633;border-radius:8px;background:#7ec8ff;cursor:crosshair}
+.back-home{position:fixed;top:14px;left:14px;z-index:30;background:rgba(0,0,0,.8);color:#6c6;border:1px solid #6c6;padding:8px 12px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px}
+#ui{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.85)}
+#ui.hidden{display:none}
+.panel{width:min(440px,94vw);background:#1a1f18;border:2px solid #3a5a3a;border-radius:14px;padding:24px;max-height:90vh;overflow:auto}
+.panel h1{text-align:center;color:#6c6;font-size:28px;margin-bottom:6px}
+.panel .sub{text-align:center;color:#8a9;font-size:13px;margin-bottom:14px}
+label{font-size:12px;color:#8a9;display:block;margin:8px 0 4px}
+input{width:100%;padding:10px;border-radius:8px;border:1px solid #3a5a3a;background:#0d120e;color:#e8ecf4;font-size:15px}
+.diffs{display:flex;gap:8px}
+.diff{flex:1;padding:10px;border:1px solid #333;background:#121;color:#aaa;border-radius:8px;cursor:pointer;font-weight:700}
+.diff.on{border-color:#6c6;color:#6c6;background:#1a2a1a}
+.btn{width:100%;margin-top:12px;padding:12px;border:none;border-radius:8px;font-weight:800;font-size:16px;cursor:pointer;background:#3a7a3a;color:#fff}
+.btn.ghost{background:transparent;border:1px solid #6c6;color:#6c6}
+#hotbar{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:4px;z-index:10;background:rgba(0,0,0,.55);padding:6px 8px;border-radius:8px;border:1px solid #333}
+.slot{width:44px;height:44px;border:2px solid #666;background:#5a5a5a;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-direction:column;font-size:10px;color:#fff;position:relative;box-shadow:inset 0 0 0 1px #3a3a3a}
+.slot.empty{background:#6e6e6e;border-color:#888}
+.slot.on{border-color:#ff0;box-shadow:0 0 8px #ff06, inset 0 0 0 1px #3a3a3a}
+.slot .n{position:absolute;bottom:2px;right:3px;font-size:11px;font-weight:700;text-shadow:0 1px 1px #000}
+.slot.drag-over{border-color:#0f0;background:#4a6a4a}
+.invSlot{cursor:grab}
+.invSlot:active{cursor:grabbing}
+#hud{position:fixed;top:14px;right:14px;z-index:10;text-align:right;font-size:13px;text-shadow:0 1px 2px #000;line-height:1.5}
+#craft{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:15;background:#1a1f18;border:2px solid #6c6;border-radius:12px;padding:16px;min-width:520px;max-width:94vw;max-height:80vh;overflow:auto}
+#craft h3{color:#6c6;margin-bottom:10px}
+#craftWrap{display:flex;gap:16px;flex-wrap:wrap}
+#craftList{flex:1;min-width:220px}
+#invPanel{flex:1;min-width:200px;border-left:1px solid #2a3a2a;padding-left:14px}
+#invPanel h3{color:#8c8;margin-bottom:10px;font-size:14px}
+.invGrid{display:grid;grid-template-columns:repeat(4,48px);gap:6px}
+.invSlot{width:48px;height:48px;border:2px solid #444;background:#111;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-direction:column;font-size:11px;color:#fff;position:relative;cursor:pointer}
+.invSlot.on{border-color:#ff0}
+.invSlot .n{position:absolute;bottom:2px;right:3px;font-size:11px;font-weight:700}
+.crec{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #2a3a2a;font-size:13px}
+.crec button{padding:4px 10px;background:#3a7a3a;border:none;color:#fff;border-radius:4px;cursor:pointer;font-weight:700}
+.crec button:disabled{opacity:0.4;cursor:default}
+#cmdBar{display:none;position:fixed;bottom:70px;left:50%;transform:translateX(-50%);z-index:25;width:min(520px,94vw)}
+#cmdIn{width:100%;padding:10px 12px;border-radius:8px;border:2px solid #6c6;background:#0d120e;color:#e8ecf4;font-size:15px;font-family:monospace}
+</style>
+</head>
+<body>
+<a class="back-home" href="../index.html">&lt; home</a>
+<div id="hud"></div>
+<div id="hotbar"></div>
+<div id="craft">
+  <h3 style="margin-bottom:12px">Inventory & Crafting <small style="color:#8a9">(E sluiten)</small></h3>
+  <div id="craftWrap">
+    <div>
+      <h3 style="color:#8c8;font-size:14px;margin-bottom:8px">Crafting</h3>
+      <div id="craftList"></div>
+    </div>
+    <div id="invPanel">
+      <h3>Inventory</h3>
+      <div class="invGrid" id="invGrid"></div>
+    </div>
+  </div>
+</div>
+<div id="ui">
+  <div class="panel" id="menu">
+    <h1>BLOCK QUEST</h1>
+    <div class="sub">2D mine · craft · versla de Ender Dragon</div>
+    <label>JOUW NAAM</label>
+    <input id="nameIn" maxlength="12" placeholder="Naam">
+    <label>DIFFICULTY</label>
+    <div class="diffs">
+      <button type="button" class="diff" data-d="easy">EASY</button>
+      <button type="button" class="diff on" data-d="medium">MEDIUM</button>
+      <button type="button" class="diff" data-d="hard">HARD</button>
+    </div>
+    <button class="btn" id="startBtn">▶ START</button>
+    <button class="btn ghost" id="homeBtn">&lt; home</button>
+    <div style="margin-top:12px;font-size:12px;color:#8a9;line-height:1.45">
+      <b>Doel:</b> mine, craft tools, vind 4 Ender Pearls + 4 Blaze Powder → Eyes of Ender → activeer portal → versla de Dragon.<br>
+      <b>Besturing:</b> WASD · Spatie · Links mine · Rechts plaats/gebruik · 1-9 hotbar · E inv · F portal/gebruik · / commands
+    </div>
+  </div>
+  <div class="panel" id="go" style="display:none">
+    <h1 id="goTitle" style="color:#f55">GAME OVER</h1>
+    <div id="goMsg" style="text-align:center;margin:12px 0"></div>
+    <button class="btn" id="againBtn">Opnieuw</button>
+    <button class="btn ghost" id="menuBtn">Menu</button>
+  </div>
+</div>
+<div id="cmdBar"><input id="cmdIn" type="text" placeholder="/gamemode creative · /give diamond 64 · /gamemode survival" autocomplete="off" spellcheck="false"></div>
+<canvas id="c" width="960" height="540"></canvas>
+<script>
+const WEBSITE_HOME='../index.html';
+const LB_KEY='heygemm_blockquest_leaderboard';
+const _mem={};
+function storageGet(k){try{return localStorage.getItem(k)}catch(e){return _mem[k]||null}}
+function storageSet(k,v){try{localStorage.setItem(k,v)}catch(e){_mem[k]=String(v)}}
+function loadLB(){try{let l=JSON.parse(storageGet(LB_KEY)||'[]');const b={};l.forEach(e=>{const n=(e.name||'Anoniem').toLowerCase();if(!b[n]||(e.score||0)>(b[n].score||0))b[n]=e});return Object.values(b).sort((a,b)=>b.score-a.score).slice(0,10)}catch{return[]}}
+function saveLB(name,score){name=(name||'Anoniem').trim();let lb=loadLB();const p=lb.find(e=>(e.name||'').toLowerCase()===name.toLowerCase());const best=Math.floor(score);if(p&&best<=(p.score||0))return lb;lb=lb.filter(e=>(e.name||'').toLowerCase()!==name.toLowerCase());lb.push({name,score:best,diff:difficulty,date:Date.now()});lb.sort((a,b)=>b.score-a.score);lb=lb.slice(0,10);storageSet(LB_KEY,JSON.stringify(lb));return lb}
+
+const TS=24; // tile size
+const W=960,H=540;
+const COLS=180,ROWS=80;
+const T={AIR:0,GRASS:1,DIRT:2,STONE:3,WOOD:4,LEAVES:5,COAL:6,IRON:7,GOLD:8,DIAMOND:9,BEDROCK:10,OBSIDIAN:11,PORTAL:12,SAND:13,NETHERRACK:14};
+const NAMES={1:'Grass',2:'Dirt',3:'Stone',4:'Wood',5:'Leaves',6:'Coal',7:'Iron',8:'Gold',9:'Diamond',11:'Obsidian',13:'Sand',14:'Netherrack'};
+const COLORS={0:null,1:'#5a9c3a',2:'#8b5a2b',3:'#888',4:'#9a6b3a',5:'#3a8a3a',6:'#333',7:'#d4a574',8:'#ffd700',9:'#5cefff',10:'#222',11:'#1a0a2a',12:'#a0f',13:'#c2b280',14:'#8b2500'};
+const HARD={1:1,2:1,3:2,4:1,5:0.4,6:2,7:3,8:3,9:4,10:99,11:5,12:99,13:1,14:1};
+const DROP={1:2,2:2,3:3,4:4,5:0,6:6,7:7,8:8,9:9,11:11,13:13,14:14};
+
+const DIFFS={easy:{label:'EASY',dmg:0.6,dragonHp:80},medium:{label:'MEDIUM',dmg:1,dragonHp:120},hard:{label:'HARD',dmg:1.5,dragonHp:180}};
+let difficulty=storageGet('heygemm_bq_diff')||'medium';
+let playerName=storageGet('heygemm_player_name')||'';
+
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+let state='menu',world,player,inv,hotbar,sel=0,gamemode='survival',cmdOpen=false,camX=0,camY=0,keys={},mineT=0,mineTarget=null,msg='',msgT=0,dim='overworld',dragon=null,portalOn=false,time=0,score=0,craftOpen=false,dragItem=null;
+
+// tools as inv items with type 'tool'
+function emptyInv(){
+  return [
+    {id:'fist',type:'tool',power:1,name:'Hand',count:1},
+    {id:2,type:'block',count:0},{id:3,type:'block',count:0},{id:4,type:'block',count:0},
+    {id:6,type:'block',count:0},{id:7,type:'block',count:0},{id:8,type:'block',count:0},{id:9,type:'block',count:0},
+    {id:'pick_wood',type:'tool',power:2,name:'Wood Pick',count:0},
+    {id:'pick_stone',type:'tool',power:3,name:'Stone Pick',count:0},
+    {id:'pick_iron',type:'tool',power:4,name:'Iron Pick',count:0},
+    {id:'pick_dia',type:'tool',power:5,name:'Dia Pick',count:0},
+    {id:'pearl',type:'item',count:0,name:'Ender Pearl'},
+    {id:'blaze',type:'item',count:0,name:'Blaze Powder'},
+    {id:'eye',type:'item',count:0,name:'Eye of Ender'},
+    {id:11,type:'block',count:0}
+  ];
+}
+
+function genWorld(){
+  const g=Array.from({length:ROWS},()=>Array(COLS).fill(T.AIR));
+  const surface=Array(COLS);
+  for(let x=0;x<COLS;x++)surface[x]=28+Math.floor(Math.sin(x*0.15)*3+Math.sin(x*0.05)*4);
+  for(let x=0;x<COLS;x++){
+    const s=surface[x];
+    for(let y=s;y<ROWS;y++){
+      if(y===s)g[y][x]=T.GRASS;
+      else if(y<s+4)g[y][x]=T.DIRT;
+      else if(y>=ROWS-2)g[y][x]=T.BEDROCK;
+      else g[y][x]=T.STONE;
+    }
+    // trees
+    if(x>5&&x<COLS-5&&Math.random()<0.06){
+      const th=3+Math.floor(Math.random()*3);
+      for(let i=1;i<=th;i++)if(s-i>=0)g[s-i][x]=T.WOOD;
+      for(let dy=-2;dy<=0;dy++)for(let dx=-2;dx<=2;dx++){
+        if(Math.abs(dx)+Math.abs(dy)<4&&s-th+dy>=0&&x+dx>=0&&x+dx<COLS&&g[s-th+dy][x+dx]===T.AIR)g[s-th+dy][x+dx]=T.LEAVES;
+      }
+    }
+  }
+  // ores
+  for(let i=0;i<400;i++){
+    const x=1+Math.floor(Math.random()*(COLS-2)),y=40+Math.floor(Math.random()*(ROWS-45));
+    if(g[y][x]===T.STONE)g[y][x]=T.COAL;
+  }
+  for(let i=0;i<180;i++){
+    const x=1+Math.floor(Math.random()*(COLS-2)),y=48+Math.floor(Math.random()*(ROWS-52));
+    if(g[y][x]===T.STONE)g[y][x]=T.IRON;
+  }
+  for(let i=0;i<60;i++){
+    const x=1+Math.floor(Math.random()*(COLS-2)),y=55+Math.floor(Math.random()*(ROWS-58));
+    if(g[y][x]===T.STONE)g[y][x]=T.GOLD;
+  }
+  for(let i=0;i<35;i++){
+    const x=1+Math.floor(Math.random()*(COLS-2)),y=60+Math.floor(Math.random()*(ROWS-63));
+    if(g[y][x]===T.STONE)g[y][x]=T.DIAMOND;
+  }
+  // cave pockets
+  for(let i=0;i<25;i++){
+    let cx=10+Math.floor(Math.random()*(COLS-20)),cy=45+Math.floor(Math.random()*20);
+    for(let k=0;k<30;k++){
+      if(cy>30&&cy<ROWS-3&&cx>1&&cx<COLS-1&&g[cy][cx]!==T.BEDROCK)g[cy][cx]=T.AIR;
+      cx+=Math.floor(Math.random()*3)-1;cy+=Math.floor(Math.random()*3)-1;
+    }
+  }
+  // end portal frame room deep
+  const px=COLS-25,py=ROWS-12;
+  for(let dx=0;dx<7;dx++)for(let dy=0;dy<5;dy++)g[py+dy][px+dx]=T.AIR;
+  for(let dx=1;dx<6;dx++){g[py+4][px+dx]=T.OBSIDIAN;g[py][px+dx]=T.OBSIDIAN}
+  for(let dy=0;dy<5;dy++){g[py+dy][px]=T.OBSIDIAN;g[py+dy][px+6]=T.OBSIDIAN}
+  g[py+2][px+3]=T.AIR; // center
+  return {g,surface,portal:{x:px+3,y:py+2},eyes:0};
+}
+
+function genEnd(){
+  const g=Array.from({length:40},()=>Array(60).fill(T.AIR));
+  for(let x=0;x<60;x++)for(let y=30;y<40;y++)g[y][x]=T.OBSIDIAN;
+  // island
+  for(let x=15;x<45;x++)for(let y=28;y<31;y++)if(Math.hypot(x-30,y-29)<16)g[y][x]=T.NETHERRACK;
+  for(let x=18;x<42;x++)if(g[28][x]===T.NETHERRACK)g[28][x]=T.GRASS;
+  return g;
+}
+
+function itemMeta(id){
+  if(typeof id==='number')return {id:id,type:'block',name:NAMES[id]||('#'+id)};
+  if(id==='pearl')return {id:'pearl',type:'item',name:'Ender Pearl'};
+  if(id==='blaze')return {id:'blaze',type:'item',name:'Blaze Powder'};
+  if(id==='eye')return {id:'eye',type:'item',name:'Eye of Ender'};
+  if(id==='pick_wood')return {id:'pick_wood',type:'tool',power:2,name:'Wood Pick'};
+  if(id==='pick_stone')return {id:'pick_stone',type:'tool',power:3,name:'Stone Pick'};
+  if(id==='pick_iron')return {id:'pick_iron',type:'tool',power:4,name:'Iron Pick'};
+  if(id==='pick_dia')return {id:'pick_dia',type:'tool',power:5,name:'Dia Pick'};
+  if(id==='sword_wood')return {id:'sword_wood',type:'sword',atk:3,name:'Wood Sword'};
+  if(id==='sword_stone')return {id:'sword_stone',type:'sword',atk:5,name:'Stone Sword'};
+  if(id==='sword_iron')return {id:'sword_iron',type:'sword',atk:7,name:'Iron Sword'};
+  if(id==='sword_dia')return {id:'sword_dia',type:'sword',atk:10,name:'Diamond Sword'};
+  if(id==='fist')return {id:'fist',type:'tool',power:1,name:'Hand'};
+  return {id:id,type:'item',name:String(id)};
+}
+function addItem(id,n){
+  n=n||1;
+  const meta=itemMeta(id);
+  if(meta.type==='tool'||meta.type==='sword'){
+    let s=inv.find(x=>x.id===id);
+    if(s){s.count=1;return}
+    inv.push(Object.assign({},meta,{count:1}));
+    return;
+  }
+  let s=inv.find(x=>x.id===id&&x.type!=='tool');
+  if(s){s.count+=n;return}
+  inv.push(Object.assign({},meta,{count:n}));
+}
+function countItem(id){
+  let n=0;
+  inv.forEach(x=>{if(x.id===id)n+=x.count||0});
+  hotbar.forEach(x=>{if(x&&x.id===id)n+=x.count||0});
+  return n;
+}
+function takeItem(id,n){
+  n=n||1;
+  // take from inv first, then hotbar
+  for(const list of [inv,hotbar]){
+    for(let i=0;i<list.length&&n>0;i++){
+      const s=list[i];if(!s||s.id!==id)continue;
+      const use=Math.min(n,s.count||0);
+      s.count-=use;n-=use;
+      if(s.count<=0){if(list===inv)list.splice(i,1),i--;else list[i]=null}
+    }
+  }
+  return n<=0;
+}
+
+function toolPower(){
+  const s=hotbar[sel];
+  if(s&&s.type==='tool'&&s.count>0)return s.power||1;
+  const picks=['pick_dia','pick_iron','pick_stone','pick_wood'];
+  for(const list of [hotbar,inv]){
+    for(const p of picks){const t=list.find(x=>x&&x.id===p&&x.count>0);if(t)return t.power}
+  }
+  return 1;
+}
+function swordAtk(){
+  const s=hotbar[sel];
+  if(s&&s.type==='sword'&&s.count>0)return s.atk||3;
+  return 1; // fist
+}
+function selectedStack(){return hotbar[sel]}
+
+const RECIPES=[
+  {out:'pick_wood',outN:1,need:[[4,5]],name:'Wood Pickaxe'},
+  {out:'pick_stone',outN:1,need:[[3,4],[4,2]],name:'Stone Pickaxe'},
+  {out:'pick_iron',outN:1,need:[[7,4],[4,2]],name:'Iron Pickaxe'},
+  {out:'pick_dia',outN:1,need:[[9,4],[4,2]],name:'Diamond Pickaxe'},
+  {out:'sword_wood',outN:1,need:[[4,3]],name:'Wood Sword'},
+  {out:'sword_stone',outN:1,need:[[3,3],[4,1]],name:'Stone Sword'},
+  {out:'sword_iron',outN:1,need:[[7,3],[4,1]],name:'Iron Sword'},
+  {out:'sword_dia',outN:1,need:[[9,3],[4,1]],name:'Diamond Sword'},
+  {out:'eye',outN:1,need:[['pearl',1],['blaze',1]],name:'Eye of Ender'},
+];
+
+function canCraft(r){return r.need.every(([id,n])=>countItem(id)>=n)}
+function doCraft(r){
+  if(!canCraft(r))return;
+  r.need.forEach(([id,n])=>takeItem(id,n));
+  addItem(r.out,r.outN);
+  flash('Crafted '+r.name+' — open E en sleep naar hotbar');
+}
+
+function flash(t){msg=t;msgT=2.5}
+function solid(tx,ty,map){
+  if(ty<0||tx<0||tx>=map[0].length||ty>=map.length)return true;
+  const t=map[ty][tx];return t!==T.AIR&&t!==T.PORTAL&&t!==T.LEAVES;
+}
+
+function spawnPlayer(){
+  const s=world.surface[20]||30;
+  player={x:20*TS+2,y:(s-3)*TS,w:14,h:28,vx:0,vy:0,onG:false,hp:20,maxHp:20,facing:1,fall:0,regenT:0};
+}
+
+function startGame(){
+  playerName=(document.getElementById('nameIn').value.trim()||'Anoniem').slice(0,12);
+  storageSet('heygemm_player_name',playerName);
+  storageSet('heygemm_bq_diff',difficulty);
+  world=genWorld();
+  inv=[];
+  hotbar=Array(9).fill(null);
+  sel=0;dim='overworld';dragon=null;portalOn=false;time=0;score=0;craftOpen=false;gamemode='survival';cmdOpen=false;document.getElementById('cmdBar').style.display='none';
+  spawnPlayer();
+  drawHotbar();
+  state='play';
+  document.getElementById('ui').classList.add('hidden');
+  document.getElementById('craft').style.display='none';
+}
+
+function endGame(win){
+  state=win?'win':'dead';
+  if(win)score+=10000+Math.floor(player.hp*50);
+  saveLB(playerName,score);
+  document.getElementById('ui').classList.remove('hidden');
+  document.getElementById('menu').style.display='none';
+  document.getElementById('go').style.display='block';
+  document.getElementById('goTitle').style.color=win?'#6c6':'#f55';
+  document.getElementById('goTitle').textContent=win?'DRAGON DEFEATED!':'GAME OVER';
+  document.getElementById('goMsg').innerHTML=`${playerName}<br>Score: ${Math.floor(score)}<br>${win?'Je hebt Block Quest uitgespeeld!':'Je bent gestorven.'}`;
+}
+
+document.getElementById('nameIn').value=playerName;
+document.querySelectorAll('.diff').forEach(b=>{
+  b.classList.toggle('on',b.dataset.d===difficulty);
+  b.onclick=()=>{difficulty=b.dataset.d;document.querySelectorAll('.diff').forEach(x=>x.classList.toggle('on',x.dataset.d===difficulty))};
+});
+document.getElementById('startBtn').onclick=startGame;
+document.getElementById('homeBtn').onclick=()=>location.href=WEBSITE_HOME;
+document.querySelector('.back-home').onclick=e=>{e.preventDefault();location.href=WEBSITE_HOME};
+document.getElementById('againBtn').onclick=()=>{document.getElementById('go').style.display='none';document.getElementById('menu').style.display='block';document.getElementById('ui').classList.remove('hidden');startGame()};
+document.getElementById('menuBtn').onclick=()=>{document.getElementById('go').style.display='none';document.getElementById('menu').style.display='block'};
+
+window.addEventListener('keydown',e=>{
+  if(cmdOpen){
+    if(e.key==='Escape'){closeCmd();e.preventDefault()}
+    if(e.key==='Enter'){runCmd(document.getElementById('cmdIn').value);e.preventDefault()}
+    return; // don't move while typing
+  }
+  keys[e.key.toLowerCase()]=true;
+  if(e.key>='1'&&e.key<='9'){sel=Math.min(8,parseInt(e.key,10)-1);drawHotbar();}
+  if(e.key.toLowerCase()==='e'&&state==='play'){craftOpen=!craftOpen;document.getElementById('craft').style.display=craftOpen?'block':'none';renderCraft()}
+  if(e.key.toLowerCase()==='f'&&state==='play'){
+    const s=hotbar[sel];
+    if(s&&(s.id==='pearl'||s.id==='eye')&&s.count>0){
+      const map=dim==='end'?world.endMap:world.g;
+      useHotbarItem(player.x+player.w/2+(player.facing*4*TS),player.y,Math.floor(player.x/TS),Math.floor(player.y/TS),map);
+    } else tryPortal();
+  }
+  if(e.key==='/'&&state==='play'){openCmd();e.preventDefault()}
+  if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(e.key.toLowerCase()))e.preventDefault();
+});
+function openCmd(){
+  cmdOpen=true;craftOpen=false;document.getElementById('craft').style.display='none';
+  const bar=document.getElementById('cmdBar');bar.style.display='block';
+  const inp=document.getElementById('cmdIn');inp.value='/';inp.focus();
+  setTimeout(()=>{inp.setSelectionRange(1,1)},0);
+}
+function closeCmd(){
+  cmdOpen=false;document.getElementById('cmdBar').style.display='none';document.getElementById('cmdIn').blur();
+}
+const GIVE_MAP={
+  dirt:2,grass:1,stone:3,wood:4,log:4,leaves:5,coal:6,iron:7,gold:8,diamond:9,obsidian:11,sand:13,netherrack:14,
+  pearl:'pearl',enderpearl:'pearl','ender_pearl':'pearl',
+  blaze:'blaze',blazepowder:'blaze','blaze_powder':'blaze',
+  eye:'eye',endereye:'eye','eye_of_ender':'eye','ender_eye':'eye',
+  pick_wood:'pick_wood',woodpick:'pick_wood',
+  pick_stone:'pick_stone',stonepick:'pick_stone',
+  pick_iron:'pick_iron',ironpick:'pick_iron',
+  pick_dia:'pick_dia',diapick:'pick_dia',diamondpick:'pick_dia','diamond_pickaxe':'pick_dia',
+  sword_wood:'sword_wood',woodsword:'sword_wood','wooden_sword':'sword_wood',
+  sword_stone:'sword_stone',stonesword:'sword_stone',
+  sword_iron:'sword_iron',ironsword:'sword_iron',
+  sword_dia:'sword_dia',diasword:'sword_dia',diamondsword:'sword_dia','diamond_sword':'sword_dia'
+};
+function runCmd(raw){
+  closeCmd();
+  let line=(raw||'').trim();
+  if(!line.startsWith('/'))line='/'+line;
+  const parts=line.slice(1).trim().split(/\s+/);
+  const cmd=(parts[0]||'').toLowerCase();
+  if(cmd==='gamemode'||cmd==='gm'){
+    const m=(parts[1]||'').toLowerCase();
+    if(['survival','s','0'].includes(m)){gamemode='survival';flash('Gamemode: SURVIVAL')}
+    else if(['creative','c','1'].includes(m)){gamemode='creative';flash('Gamemode: CREATIVE')}
+    else if(['spectator','sp','3'].includes(m)){gamemode='spectator';flash('Gamemode: SPECTATOR')}
+    else flash('Gebruik: /gamemode survival|creative|spectator');
+  } else if(cmd==='give'){
+    const item=(parts[1]||'').toLowerCase();
+    const n=Math.min(999,Math.max(1,parseInt(parts[2],10)||1));
+    const id=GIVE_MAP[item];
+    if(id==null){flash('Onbekend item. Voorbeelden: diamond, iron, stone, pearl, eye, pick_dia');return}
+    addItem(id,n);drawHotbar();flash('Given '+n+'x '+item);
+  } else if(cmd==='help'){
+    flash('/gamemode · /give <item> [aantal]');
+  } else {
+    flash('Onbekend command. /help');
+  }
+}
+window.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+
+function renderCraft(){
+  const el=document.getElementById('craftList');
+  el.innerHTML=RECIPES.map((r,i)=>{
+    const ok=canCraft(r);
+    const need=r.need.map(([id,n])=>{
+      const have=countItem(id);
+      const nm=typeof id==='number'?(NAMES[id]||id):itemMeta(id).name;
+      return `${nm} ${have}/${n}`;
+    }).join(', ');
+    return `<div class="crec"><span>${r.name}<br><small style="color:#8a9">${need}</small></span><button ${ok?'':'disabled'} data-i="${i}">Craft</button></div>`;
+  }).join('');
+  el.querySelectorAll('button').forEach(b=>b.onclick=()=>{doCraft(RECIPES[+b.dataset.i]);renderCraft();drawHotbar()});
+  const grid=document.getElementById('invGrid');
+  if(!grid)return;
+  if(!inv.length){
+    grid.innerHTML='<div style="grid-column:1/-1;color:#8a9;font-size:12px;min-height:48px;padding:8px 0">Leeg — sleep vanaf hotbar hierheen</div>';
+  } else {
+  grid.innerHTML=inv.map((s,i)=>{
+    if(!s||!s.count)return '';
+    const icon=stackIcon(s);
+    const n=s.type==='tool'||s.type==='sword'?'':s.count;
+    return `<div class="invSlot" draggable="true" data-i="${i}" title="${s.name||''}">${icon}<span class="n">${n}</span></div>`;
+  }).join('');
+  }
+  // inv panel accepts drops from hotbar
+  grid.ondragover=e=>{e.preventDefault();grid.style.outline='2px solid #6c6'};
+  grid.ondragleave=()=>{grid.style.outline='none'};
+  grid.ondrop=e=>{
+    e.preventDefault();grid.style.outline='none';
+    if(!dragItem||dragItem._from!=='hot')return;
+    const item={id:dragItem.id,type:dragItem.type,count:dragItem.count,name:dragItem.name,power:dragItem.power,atk:dragItem.atk};
+    const exist=inv.find(x=>x.id===item.id&&x.type!=='tool'&&x.type!=='sword');
+    if(exist&&item.type!=='tool'&&item.type!=='sword'){exist.count+=item.count||1}
+    else inv.push(item);
+    if(dragItem._idx!=null)hotbar[dragItem._idx]=null;
+    dragItem=null;renderCraft();drawHotbar();
+  };
+  grid.querySelectorAll('.invSlot').forEach(el=>{
+    const i=+el.dataset.i;
+    el.onclick=()=>{
+      // quick-move to first empty hotbar
+      const empty=hotbar.findIndex(x=>!x||!x.count);
+      if(empty>=0){hotbar[empty]={...inv[i]};inv.splice(i,1);renderCraft();drawHotbar()}
+    };
+    el.ondragstart=e=>{
+      const it=inv[i];
+      dragItem={id:it.id,type:it.type,count:it.count,name:it.name,power:it.power,atk:it.atk,_from:'inv',_idx:i};
+      e.dataTransfer.setData('text/plain','inv');
+    };
+  });
+}
+
+function tryPortal(){
+  if(dim!=='overworld')return;
+  const px=world.portal.x,py=world.portal.y;
+  const dx=Math.abs(Math.floor(player.x/TS)-px),dy=Math.abs(Math.floor(player.y/TS)-py);
+  if(dx>4||dy>4){flash('Ga naar de portal-ruimte (diep rechts)');return}
+  if(countItem('eye')<4){flash('Je hebt 4 Eyes of Ender nodig ('+countItem('eye')+'/4)');return}
+  takeItem('eye',4);
+  portalOn=true;
+  world.g[py][px]=T.PORTAL;
+  flash('Portal geactiveerd! Loop erin.');
+}
+
+function enterEnd(){
+  dim='end';
+  world.endMap=genEnd();
+  player.x=30*TS;player.y=25*TS;player.vx=0;player.vy=0;
+  const hp=DIFFS[difficulty].dragonHp;
+  dragon={x:30*TS,y:18*TS,w:48,h:28,hp,max:hp,vx:2,t:0,alive:true};
+  flash('THE END — versla de Dragon!');
+}
+
+function useHotbarItem(mx,my,tx,ty,map){
+  const s=hotbar[sel];
+  if(!s||s.count<=0){flash('Lege hotbar-slot — sleep iets uit inventory (E)');return false}
+  // Ender Pearl = teleport
+  if(s.id==='pearl'){
+    const ptx=player.x+player.w/2,pty=player.y+player.h/2;
+    let dx=mx-ptx,dy=my-pty;
+    const len=Math.hypot(dx,dy)||1;
+    const dist=Math.min(8*TS,len);
+    dx=dx/len*dist;dy=dy/len*dist;
+    player.x+=dx;player.y+=dy;
+    // unstuck
+    if(gamemode!=='spectator'){
+      for(let i=0;i<8;i++){if(!collide(player,map))break;player.y-=TS/2}
+    }
+    if(gamemode!=='creative'){s.count--;if(s.count<=0)hotbar[sel]=null}
+    score+=5;flash('Whoosh!');drawHotbar();return true;
+  }
+  // Eye of Ender = wijst naar portal of activeert
+  if(s.id==='eye'){
+    if(dim==='overworld'){
+      const px=world.portal.x*TS,py=world.portal.y*TS;
+      const dx=px-(player.x),dy=py-(player.y);
+      const dir=Math.abs(dx)>Math.abs(dy)?(dx>0?'rechts':'links'):(dy>0?'omlaag':'omhoog');
+      flash('Eye zweeft naar '+dir+' (portal)');
+      if(gamemode!=='creative'){s.count--;if(s.count<=0)hotbar[sel]=null}
+      // near portal: help fill
+      if(Math.hypot(dx,dy)<6*TS)flash('Portal is dichtbij — F met 4 eyes in inv/hotbar');
+      drawHotbar();return true;
+    }
+    flash('Eyes werken in de overworld');return true;
+  }
+  // place block
+  if(s.type==='block'){
+    if(map[ty][tx]!==T.AIR)return false;
+    if(Math.hypot(mx-(player.x+player.w/2),my-(player.y+player.h/2))>TS*5)return false;
+    const px=Math.floor((player.x+player.w/2)/TS),py=Math.floor((player.y+player.h/2)/TS);
+    if(tx===px&&(ty===py||ty===Math.floor(player.y/TS)))return false;
+    map[ty][tx]=s.id;
+    if(gamemode!=='creative'){s.count--;if(s.count<=0)hotbar[sel]=null}
+    drawHotbar();return true;
+  }
+  if(s.type==='tool')flash(s.name||'Tool');
+  if(s.type==='sword')flash((s.name||'Sword')+' — F om te slaan');
+  return false;
+}
+canvas.addEventListener('mousedown',e=>{
+  if(state!=='play'||craftOpen||cmdOpen||gamemode==='spectator')return;
+  const r=canvas.getBoundingClientRect();
+  const mx=(e.clientX-r.left)*(W/r.width)+camX;
+  const my=(e.clientY-r.top)*(H/r.height)+camY;
+  const tx=Math.floor(mx/TS),ty=Math.floor(my/TS);
+  const map=dim==='end'?world.endMap:world.g;
+  if(ty<0||tx<0||ty>=map.length||tx>=map[0].length)return;
+  const ptx=player.x+player.w/2,pty=player.y+player.h/2;
+  if(e.button===0){
+    // mine with selected tool
+    if(Math.hypot(mx-ptx,my-pty)>TS*5)return;
+    const t=map[ty][tx];
+    if(t===T.AIR||t===T.BEDROCK||t===T.PORTAL)return;
+    mineTarget={tx,ty,t,prog:0};
+  } else if(e.button===2){
+    useHotbarItem(mx,my,tx,ty,map);
+  }
+});
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+
+function update(dt){
+  if(state!=='play')return;
+  time+=dt;score+=dt*2;
+  msgT=Math.max(0,msgT-dt);
+  const map=dim==='end'?world.endMap:world.g;
+  const p=player;
+  // move
+  const fly=gamemode==='creative'||gamemode==='spectator';
+  const spd=gamemode==='spectator'?5.5:3.2;
+  if(keys['a']||keys['arrowleft']){p.vx=-spd;p.facing=-1}
+  else if(keys['d']||keys['arrowright']){p.vx=spd;p.facing=1}
+  else p.vx*=0.7;
+  if(fly){
+    if(keys[' ']||keys['w']||keys['arrowup'])p.vy=-spd;
+    else if(keys['s']||keys['arrowdown'])p.vy=spd;
+    else p.vy*=0.7;
+  } else {
+    if((keys[' ']||keys['w']||keys['arrowup'])&&p.onG){p.vy=-7.2;p.onG=false}
+    p.vy+=0.35;
+  }
+  // x
+  p.x+=p.vx;
+  if(gamemode!=='spectator'&&collide(p,map)){p.x-=p.vx;p.vx=0}
+  // y
+  p.y+=p.vy;p.onG=false;
+  if(gamemode!=='spectator'&&collide(p,map)){
+    if(p.vy>0){p.y=Math.floor((p.y+p.h)/TS)*TS-p.h;p.onG=true}
+    else p.y=Math.floor(p.y/TS)*TS+TS;
+    p.vy=0;
+  }
+  if(gamemode==='survival'&&p.y>map.length*TS+40){p.hp=0}
+  // fall damage: only if >7 blocks; min ½ heart (1 hp)
+  if(gamemode==='survival'&&!fly){
+    if(!p.onG){
+      if(p.fallY==null)p.fallY=p.y;
+      p.fallY=Math.min(p.fallY,p.y); // highest point (smaller y is up... wait y increases downward)
+      // in this game y increases downward, so peak is min y
+    } else if(p.fallY!=null){
+      const blocks=(p.y-p.fallY)/TS;
+      if(blocks>7){
+        // 1 hp = half heart per 2 blocks over 7, min 1 hp
+        let dmg=Math.max(1, Math.floor((blocks-7)/2));
+        dmg=Math.min(10,dmg);
+        p.hp-=dmg;
+        flash('-'+(dmg/2)+' hart fall damage');
+        p.regenT=3;
+      }
+      p.fallY=null;
+    }
+  } else {p.fallY=null}
+  // regen: 10 hearts (20 hp), +1 hp every 1.2s when still
+  if(gamemode==='survival'&&p.hp>0&&p.hp<p.maxHp){
+    p.regenT=(p.regenT||0)-dt;
+    if(p.regenT<=0&&Math.abs(p.vx)<0.2&&p.onG){
+      p.hp=Math.min(p.maxHp,p.hp+1);
+      p.regenT=1.2;
+    }
+  }
+  // mine progress
+  if(mineTarget){
+    const {tx,ty,t}=mineTarget;
+    if(map[ty][tx]!==t){mineTarget=null}
+    else{
+      const hard=HARD[t]||1;
+      const pow=toolPower();
+      mineTarget.prog+=gamemode==='creative'?99:dt*pow/hard*2.2;
+      if(mineTarget.prog>=1){
+        map[ty][tx]=T.AIR;
+        const d=DROP[t];
+        if(d){
+          addItem(d,1);
+          flash('+'+(NAMES[d]||d));
+        }
+        if(t===T.DIAMOND&&Math.random()<0.3){addItem('pearl',1);flash('+Ender Pearl')}
+        if(t===T.GOLD&&Math.random()<0.25){addItem('blaze',1);flash('+Blaze Powder')}
+        if(t===T.IRON&&Math.random()<0.08){addItem('pearl',1);flash('+Ender Pearl')}
+        if(t===T.LEAVES&&Math.random()<0.15){addItem(4,1);flash('+Wood')}
+        score+=10*hard;
+        mineTarget=null;
+        drawHotbar();
+        if(craftOpen)renderCraft();
+      }
+    }
+  }
+  // portal enter
+  if(dim==='overworld'&&portalOn){
+    const tx=Math.floor((p.x+p.w/2)/TS),ty=Math.floor((p.y+p.h/2)/TS);
+    if(world.g[ty]&&world.g[ty][tx]===T.PORTAL)enterEnd();
+  }
+  // dragon
+  if(dim==='end'&&dragon&&dragon.alive){
+    dragon.t+=dt;
+    dragon.x+=dragon.vx;
+    if(dragon.x<10*TS||dragon.x>48*TS)dragon.vx*=-1;
+    dragon.y=16*TS+Math.sin(dragon.t*1.2)*20;
+    // fireball-ish contact
+    if(Math.hypot((p.x+p.w/2)-(dragon.x+dragon.w/2),(p.y+p.h/2)-(dragon.y+dragon.h/2))<40){
+      if(gamemode==='survival'){p.hp-=DIFFS[difficulty].dmg*8*dt;p.regenT=4}
+    }
+    // click dragon to damage - handled via mine on empty? add key attack
+    if(keys['f']||keys['shift']){
+      if(Math.hypot((p.x+p.w/2)-(dragon.x+dragon.w/2),(p.y+p.h/2)-(dragon.y+dragon.h/2))<100){
+        const dmg=swordAtk()*10*dt;
+        dragon.hp-=dmg;
+        score+=dt*25*(swordAtk());
+        if(dragon.hp<=0){dragon.alive=false;endGame(true)}
+      }
+    }
+  }
+  if(p.hp<=0)endGame(false);
+  // camera
+  camX=Math.max(0,Math.min(map[0].length*TS-W,p.x-W*0.4));
+  camY=Math.max(0,Math.min(map.length*TS-H,p.y-H*0.5));
+}
+
+function collide(p,map){
+  const x0=Math.floor(p.x/TS),x1=Math.floor((p.x+p.w-0.1)/TS);
+  const y0=Math.floor(p.y/TS),y1=Math.floor((p.y+p.h-0.1)/TS);
+  for(let ty=y0;ty<=y1;ty++)for(let tx=x0;tx<=x1;tx++)if(solid(tx,ty,map))return true;
+  return false;
+}
+
+function stackIcon(s){
+  if(!s)return '';
+  if(s.type==='block'&&COLORS[s.id])return `<div style="width:18px;height:18px;background:${COLORS[s.id]};border:1px solid #0006;border-radius:2px"></div>`;
+  const toolCol={
+    pick_wood:'#c4a35a',pick_stone:'#9a9a9a',pick_iron:'#d8d8e0',pick_dia:'#5cefff',
+    sword_wood:'#c4a35a',sword_stone:'#9a9a9a',sword_iron:'#d8d8e0',sword_dia:'#5cefff',
+    fist:'#e8b890'
+  };
+  if(s.type==='tool'||s.type==='sword'){
+    const col=toolCol[s.id]||'#fff';
+    const sym=s.type==='sword'?'⚔':'⛏';
+    return `<span style="color:${col};font-size:18px;filter:drop-shadow(0 0 2px #000)">${sym}</span>`;
+  }
+  if(s.id==='pearl')return '<span style="color:#a0f;font-size:16px">●</span>';
+  if(s.id==='blaze')return '<span style="color:#fa0;font-size:16px">✦</span>';
+  if(s.id==='eye')return '<span style="color:#0f8;font-size:16px">◉</span>';
+  return '·';
+}
+function drawHotbar(){
+  if(!hotbar)hotbar=Array(9).fill(null);
+  const hb=document.getElementById('hotbar');
+  hb.innerHTML=hotbar.map((s,i)=>{
+    const on=i===sel?'on':'';
+    const empty=s&&s.count>0?'':'empty';
+    const icon=s&&s.count>0?stackIcon(s):'';
+    const n=s&&s.count>0&&s.type!=='tool'?s.count:(s&&s.type==='tool'&&s.count?'' :'');
+    return `<div class="slot ${on} ${empty}" data-i="${i}">${icon}<span class="n">${s&&s.count>0&&s.type!=='tool'?s.count:''}</span></div>`;
+  }).join('');
+  hb.querySelectorAll('.slot').forEach(el=>{
+    const i=+el.dataset.i;
+    const stack=hotbar[i];
+    el.onclick=e=>{
+      sel=i;
+      // shift-click or double path: return to inventory
+      if(e.shiftKey&&stack&&stack.count>0){
+        const item={id:stack.id,type:stack.type,count:stack.count,name:stack.name,power:stack.power,atk:stack.atk};
+        const exist=inv.find(x=>x.id===item.id&&x.type!=='tool'&&x.type!=='sword');
+        if(exist&&item.type!=='tool'&&item.type!=='sword')exist.count+=item.count;
+        else inv.push(item);
+        hotbar[i]=null;
+        drawHotbar();if(craftOpen)renderCraft();
+      }
+    };
+    el.ondragover=e=>{e.preventDefault();el.classList.add('drag-over')};
+    el.ondragleave=()=>el.classList.remove('drag-over');
+    el.ondrop=e=>{
+      e.preventDefault();el.classList.remove('drag-over');
+      if(!dragItem)return;
+      const item={id:dragItem.id,type:dragItem.type,count:dragItem.count,name:dragItem.name,power:dragItem.power};
+      hotbar[i]=item;
+      if(dragItem._from==='inv'&&dragItem._idx!=null){
+        inv.splice(dragItem._idx,1);
+      }
+      if(dragItem._from==='hot'&&dragItem._idx!=null&&dragItem._idx!==i){
+        hotbar[dragItem._idx]=null;
+      }
+      dragItem=null;drawHotbar();if(craftOpen)renderCraft();
+    };
+    if(stack&&stack.count>0){
+      el.draggable=true;
+      el.ondragstart=e=>{
+        dragItem={id:stack.id,type:stack.type,count:stack.count,name:stack.name,power:stack.power,_from:'hot',_idx:i};
+        e.dataTransfer.setData('text/plain','hot');
+      };
+    }
+  });
+}
+
+function draw(){
+  const map=dim==='end'?(world&&world.endMap):world&&world.g;
+  if(!map){ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);return}
+  // sky
+  if(dim==='end'){ctx.fillStyle='#0a0012';ctx.fillRect(0,0,W,H)}
+  else{
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#5c94fc');g.addColorStop(1,'#b0d8ff');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  }
+  const x0=Math.floor(camX/TS),x1=Math.min(map[0].length-1,x0+Math.ceil(W/TS)+1);
+  const y0=Math.floor(camY/TS),y1=Math.min(map.length-1,y0+Math.ceil(H/TS)+1);
+  for(let ty=y0;ty<=y1;ty++)for(let tx=x0;tx<=x1;tx++){
+    const t=map[ty][tx];if(!t)continue;
+    const c=COLORS[t];if(!c)continue;
+    ctx.fillStyle=c;
+    ctx.fillRect(tx*TS-camX,ty*TS-camY,TS,TS);
+    if(t===T.DIAMOND){ctx.fillStyle='#fff8';ctx.fillRect(tx*TS-camX+6,ty*TS-camY+6,4,4)}
+    if(t===T.PORTAL){ctx.fillStyle=`rgba(180,0,255,${0.5+Math.sin(time*5)*0.3})`;ctx.fillRect(tx*TS-camX,ty*TS-camY,TS,TS)}
+  }
+  // mine overlay
+  if(mineTarget){
+    ctx.fillStyle=`rgba(255,255,255,${0.2+mineTarget.prog*0.5})`;
+    ctx.fillRect(mineTarget.tx*TS-camX,mineTarget.ty*TS-camY,TS,TS);
+  }
+  // player
+  const p=player;
+  ctx.fillStyle='#5bc0eb';ctx.fillRect(p.x-camX,p.y-camY+6,p.w,p.h-6);
+  ctx.fillStyle='#f4d35e';ctx.fillRect(p.x-camX+2,p.y-camY,p.w-4,10);
+  // dragon
+  if(dragon&&dragon.alive){
+    ctx.fillStyle='#1a0a2a';ctx.fillRect(dragon.x-camX,dragon.y-camY,dragon.w,dragon.h);
+    ctx.fillStyle='#f0f';ctx.fillRect(dragon.x-camX+8,dragon.y-camY+8,10,8);
+    ctx.fillStyle='#f55';ctx.fillRect(dragon.x-camX,dragon.y-camY-8,dragon.w*(dragon.hp/dragon.max),5);
+    ctx.fillStyle='#fff';ctx.font='12px sans-serif';ctx.fillText('ENDER DRAGON — F om te slaan',dragon.x-camX-20,dragon.y-camY-14);
+  }
+  // msg
+  if(msgT>0){ctx.fillStyle='#fff';ctx.font='bold 16px Segoe UI';ctx.textAlign='center';ctx.fillText(msg,W/2,40);ctx.textAlign='left'}
+  // hud text
+  const hand=hotbar[sel];const handN=hand&&hand.count?((hand.name||hand.id)+(hand.type==='sword'?' ⚔':'')):'(leeg)';
+  const hp=Math.max(0,player.hp);
+  let hearts='';
+  for(let i=0;i<10;i++){
+    if(hp>=(i+1)*2)hearts+='❤';
+    else if(hp>=i*2+1)hearts+='♥';
+    else hearts+='♡';
+  }
+  document.getElementById('hud').innerHTML=`${hearts}<br>Score ${score|0}<br>${dim==='end'?'THE END':DIFFS[difficulty].label}<br>Eyes ${countItem('eye')}/4<br>Mode ${gamemode}<br>Hand: ${handN}`;
+  drawHotbar();
+}
+
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(0.05,(now-last)/1000);last=now;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
